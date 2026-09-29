@@ -1,5 +1,5 @@
 //! Deploy Agent Skills from git repositories and local directories,
-//! declaratively, from a single `skillmgr.yaml`.
+//! declaratively, from a single `pollen.yaml`.
 
 pub mod cli;
 pub mod command;

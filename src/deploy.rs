@@ -13,9 +13,9 @@ use walkdir::WalkDir;
 use crate::source::relative_slug;
 
 /// Prefix of the staging directories an install renames from.
-pub const STAGING_PREFIX: &str = ".skillmgr-staging-";
+pub const STAGING_PREFIX: &str = ".pollen-staging-";
 /// Prefix of the directories a replacement moves the previous version to.
-pub const REPLACED_PREFIX: &str = ".skillmgr-replaced-";
+pub const REPLACED_PREFIX: &str = ".pollen-replaced-";
 
 /// Fingerprint of a skill directory: every file's path and content.
 ///

@@ -1,4 +1,4 @@
-//! `skillmgr schema`: print the JSON Schema for `skillmgr.yaml`.
+//! `pollen schema`: print the JSON Schema for `pollen.yaml`.
 
 use anyhow::Result;
 

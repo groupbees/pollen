@@ -1,4 +1,4 @@
-//! `skillmgr update`: install, refresh and prune the declared skills.
+//! `pollen update`: install, refresh and prune the declared skills.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -271,7 +271,7 @@ fn install(
 
     if known.is_none() && destination.exists() && !force {
         bail!(
-            "{} already exists and skillmgr did not install it; move it aside, or pass --force to take it over",
+            "{} already exists and pollen did not install it; move it aside, or pass --force to take it over",
             destination.display()
         );
     }

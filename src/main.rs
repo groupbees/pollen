@@ -1,11 +1,11 @@
-//! `skillmgr` — deploy Agent Skills declared in `skillmgr.yaml`.
+//! `pollen` — deploy Agent Skills declared in `pollen.yaml`.
 
 use anyhow::{Result, bail};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use skillmgr::cli::{Cli, Command};
-use skillmgr::{command, shutdown};
+use pollen::cli::{Cli, Command};
+use pollen::{command, shutdown};
 
 #[tokio::main]
 async fn main() -> Result<()> {

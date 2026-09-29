@@ -1,7 +1,7 @@
 # Contributing
 
 Issues and pull requests go to
-<https://github.com/groupbees/skillmgr>. The short version: install the
+<https://github.com/groupbees/pollen>. The short version: install the
 toolchain, run `pre-commit install`, keep `cargo test` green.
 
 ## Development setup
@@ -114,14 +114,14 @@ pre-commit run cargo-clippy --all-files
 | `actionlint` | Workflow syntax and expressions | Fix the workflow |
 | `cargo-fmt` | Formatting | `cargo fmt` |
 | `cargo-clippy` | `clippy` with `pedantic`, warnings denied | Fix the finding, or add a scoped `#[allow]` with a justification |
-| `skillmgr-validate` | [examples/skillmgr.yaml](examples/skillmgr.yaml) still satisfies the config rules | Fix the example, or the rule that broke it |
-| `skillmgr-schema` | [schema/skillmgr.schema.json](schema/skillmgr.schema.json) matches the config types | Re-run; the hook rewrites the file |
+| `pollen-validate` | [examples/pollen.yaml](examples/pollen.yaml) still satisfies the config rules | Fix the example, or the rule that broke it |
+| `pollen-schema` | [schema/pollen.schema.json](schema/pollen.schema.json) matches the config types | Re-run; the hook rewrites the file |
 | `shellcheck` | The scripts in [scripts/](scripts/) | Fix the script |
 
 [.pre-commit-hooks.yaml](.pre-commit-hooks.yaml) at the repository root is a
 different file with a confusingly similar name: it declares the hook *other*
 repositories consume (see [README.md](README.md#pre-commit-hook)), and nothing
-in it runs here. The `skillmgr-validate` hook above is this repo dogfooding the
+in it runs here. The `pollen-validate` hook above is this repo dogfooding the
 same check through `cargo run`.
 
 `--no-verify` and `SKIP=` are not the fix. A red hook is a real finding: fix
@@ -147,7 +147,7 @@ holds `security-events: write` for the SARIF upload and nothing else.
 
 ## The generated JSON Schema
 
-[schema/skillmgr.schema.json](schema/skillmgr.schema.json) is generated from
+[schema/pollen.schema.json](schema/pollen.schema.json) is generated from
 the types in [src/config.rs](src/config.rs) and committed, because editors and
 external validators point at the file rather than at the binary. Changing the
 config types means regenerating it in the same commit:
@@ -156,7 +156,7 @@ config types means regenerating it in the same commit:
 ./scripts/generate-schema.sh
 ```
 
-The `skillmgr-schema` pre-commit hook does this for you, and a test fails if
+The `pollen-schema` pre-commit hook does this for you, and a test fails if
 the committed copy is stale — so a forgotten regeneration turns up locally
 rather than in review.
 

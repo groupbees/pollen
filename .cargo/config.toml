@@ -1,4 +1,4 @@
 # Without a static CRT the MSVC binary needs `vcruntime140.dll`, which a clean
-# Windows install lacks, so the released `skillmgr.exe` would not start there.
+# Windows install lacks, so the released `pollen.exe` would not start there.
 [target.'cfg(all(windows, target_env = "msvc"))']
 rustflags = ["-C", "target-feature=+crt-static"]

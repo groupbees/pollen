@@ -1,6 +1,6 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/groupbees/skillmgr/main/schema/skillmgr.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/groupbees/pollen/main/schema/pollen.schema.json
 #
-# Every key skillmgr understands, with its default in a comment.
+# Every key pollen understands, with its default in a comment.
 
 # Where the skills are deployed; each directory gets a full copy. A relative
 # path resolves against the working directory, and `~` is expanded.

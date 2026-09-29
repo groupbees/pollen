@@ -1,4 +1,4 @@
-//! The declarative input: `skillmgr.yaml`, its schema, and its validation.
+//! The declarative input: `pollen.yaml`, its schema, and its validation.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -18,10 +18,10 @@ pub const DEFAULT_TARGETS: [&str; 2] = [".claude/skills", ".agents/skills"];
 /// The sentinel `repo:` value meaning "paths are relative to this config file".
 pub const LOCAL_REPO: &str = "local";
 
-/// A parsed and validated `skillmgr.yaml`.
+/// A parsed and validated `pollen.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(title = "skillmgr configuration")]
+#[schemars(title = "pollen configuration")]
 pub struct Config {
     /// Directories the skills are deployed into, each getting a full copy.
     ///
@@ -89,7 +89,7 @@ pub struct PathSpec {
 /// Where a [`RepoSpec`]'s files come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    /// The directory holding `skillmgr.yaml`.
+    /// The directory holding `pollen.yaml`.
     Local,
     /// A git repository, pinned to a revision.
     Git {
@@ -110,7 +110,7 @@ impl Config {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read the config file {}", path.display()))?;
         let mut config: Self = serde_norway::from_str(&text)
-            .with_context(|| format!("{} is not a valid skillmgr config", path.display()))?;
+            .with_context(|| format!("{} is not a valid pollen config", path.display()))?;
         // `validator` files a struct-level failure under the field name
         // `__all__`, which means nothing to whoever is reading the error.
         config.validate().map_err(|errors| {
@@ -254,7 +254,7 @@ mod tests {
 
     fn parse(yaml: &str) -> Result<Config> {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("skillmgr.yaml");
+        let path = dir.path().join("pollen.yaml");
         std::fs::write(&path, yaml).unwrap();
         Config::load(&path)
     }

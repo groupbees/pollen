@@ -1,4 +1,4 @@
-//! What skillmgr installed, so it knows what it may replace and remove.
+//! What pollen installed, so it knows what it may replace and remove.
 //!
 //! The file lives in the target directory rather than next to the config: the
 //! config is shared and version-controlled, whereas what is on disk is a
@@ -11,11 +11,11 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 /// Name of the state file inside the target directory.
-pub const STATE_FILE: &str = ".skillmgr.json";
+pub const STATE_FILE: &str = ".pollen.json";
 
 const CURRENT_VERSION: u32 = 1;
 
-/// The record of every skill skillmgr owns in one target directory.
+/// The record of every skill pollen owns in one target directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct State {
@@ -56,7 +56,7 @@ impl State {
     /// # Errors
     ///
     /// When the file cannot be read, is corrupt, or was written by a newer
-    /// skillmgr.
+    /// pollen.
     pub fn load(target: &Path) -> Result<Self> {
         let path = Self::path(target);
         if !path.is_file() {
@@ -73,7 +73,7 @@ impl State {
         })?;
         anyhow::ensure!(
             state.version == CURRENT_VERSION,
-            "{} was written by a newer skillmgr (state version {}); upgrade skillmgr",
+            "{} was written by a newer pollen (state version {}); upgrade pollen",
             path.display(),
             state.version
         );
@@ -92,7 +92,7 @@ impl State {
         let text = serde_json::to_string_pretty(self)?;
 
         let mut staging = tempfile::Builder::new()
-            .prefix(".skillmgr-state-")
+            .prefix(".pollen-state-")
             .tempfile_in(target)
             .with_context(|| format!("cannot write into {}", target.display()))?;
         std::io::Write::write_all(&mut staging, text.as_bytes())?;
@@ -150,7 +150,7 @@ mod tests {
 
         let error = State::load(target.path()).unwrap_err().to_string();
 
-        assert!(error.contains("newer skillmgr"), "{error}");
+        assert!(error.contains("newer pollen"), "{error}");
     }
 
     #[test]

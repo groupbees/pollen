@@ -4,10 +4,10 @@
 use std::path::Path;
 use std::process::Command;
 
-use skillmgr::command::update::{Action, Report, update};
-use skillmgr::config::Config;
-use skillmgr::source::Fetcher;
-use skillmgr::state::State;
+use pollen::command::update::{Action, Report, update};
+use pollen::config::Config;
+use pollen::source::Fetcher;
+use pollen::state::State;
 
 #[tokio::test]
 async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
@@ -25,7 +25,7 @@ async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
     );
     write_skill(&workspace.path().join("local-skills/draft/wip"), "wip");
 
-    let config_path = workspace.path().join("skillmgr.yaml");
+    let config_path = workspace.path().join("pollen.yaml");
     std::fs::write(
         &config_path,
         format!(
@@ -103,7 +103,7 @@ async fn a_moved_tag_reinstalls_the_skill() {
     write_skill(&origin.path().join("skills/demo"), "demo");
     commit_and_tag(origin.path(), "v1.0.0");
 
-    let config_path = workspace.path().join("skillmgr.yaml");
+    let config_path = workspace.path().join("pollen.yaml");
     std::fs::write(
         &config_path,
         format!(
@@ -170,7 +170,7 @@ fn commit_and_tag(root: &Path, tag: &str) {
     for args in [
         vec!["init", "--quiet", "--initial-branch", "main"],
         vec!["config", "user.email", "test@example.invalid"],
-        vec!["config", "user.name", "skillmgr tests"],
+        vec!["config", "user.name", "pollen tests"],
         vec!["config", "commit.gpgsign", "false"],
         vec!["config", "tag.gpgsign", "false"],
         vec!["add", "."],
@@ -194,13 +194,12 @@ fn git(root: &Path, args: &[&str]) {
     );
 }
 
-/// Drive `skillmgr validate` exactly as the command line would.
+/// Drive `pollen validate` exactly as the command line would.
 async fn run_validate(args: &[&str]) -> anyhow::Result<()> {
     use clap::Parser as _;
 
-    let cli =
-        skillmgr::cli::Cli::parse_from(std::iter::once("skillmgr").chain(args.iter().copied()));
-    let skillmgr::cli::Command::Validate {
+    let cli = pollen::cli::Cli::parse_from(std::iter::once("pollen").chain(args.iter().copied()));
+    let pollen::cli::Command::Validate {
         configs,
         config_only,
     } = &cli.command
@@ -208,7 +207,7 @@ async fn run_validate(args: &[&str]) -> anyhow::Result<()> {
         panic!("not a validate invocation");
     };
     let (configs, config_only) = (configs.clone(), *config_only);
-    skillmgr::command::validate::run(&cli, &configs, config_only).await
+    pollen::command::validate::run(&cli, &configs, config_only).await
 }
 
 fn write_config(dir: &Path, name: &str, body: &str) -> String {
@@ -222,7 +221,7 @@ async fn config_only_validation_checks_every_file_it_is_given() {
     let workspace = tempfile::tempdir().unwrap();
     let good = write_config(
         workspace.path(),
-        "skillmgr.yaml",
+        "pollen.yaml",
         "repos:\n  - repo: local\n    paths:\n      - path: skills\n",
     );
     let bad = write_config(
@@ -249,7 +248,7 @@ async fn config_only_validation_falls_back_to_the_config_flag() {
     let workspace = tempfile::tempdir().unwrap();
     let path = write_config(
         workspace.path(),
-        "skillmgr.yaml",
+        "pollen.yaml",
         "repos:\n  - repo: local\n    paths:\n      - path: skills\n",
     );
 
@@ -272,7 +271,7 @@ async fn config_only_validation_does_not_look_at_the_skills() {
     .unwrap();
     let path = write_config(
         workspace.path(),
-        "skillmgr.yaml",
+        "pollen.yaml",
         "repos:\n  - repo: local\n    paths:\n      - path: skills\n",
     );
 

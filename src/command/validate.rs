@@ -1,4 +1,4 @@
-//! `skillmgr validate`: check one or more config files, and optionally the
+//! `pollen validate`: check one or more config files, and optionally the
 //! skills their sources yield.
 
 use std::path::{Path, PathBuf};

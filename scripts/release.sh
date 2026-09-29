@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Cut a skillmgr release: bump the version, commit, tag, and offer to push.
+# Cut a pollen release: bump the version, commit, tag, and offer to push.
 # CI publishes from the tag and refuses when Cargo.toml disagrees with it, so
 # this script is the only supported way to release.
 
@@ -97,7 +97,7 @@ cargo check --quiet --locked >/dev/null
 
 git add Cargo.toml Cargo.lock
 git commit --quiet --message "release ${version}"
-git tag --annotate "$tag" --message "skillmgr ${version}"
+git tag --annotate "$tag" --message "pollen ${version}"
 
 echo "committed and tagged ${tag} on ${branch}."
 

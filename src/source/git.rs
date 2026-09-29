@@ -178,7 +178,7 @@ async fn git(repo_dir: &Path, args: &[&str]) -> Result<String> {
     let output = command(repo_dir, args)
         .output()
         .await
-        .context("cannot run `git`; skillmgr needs it on PATH")?;
+        .context("cannot run `git`; pollen needs it on PATH")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -287,7 +287,7 @@ mod tests {
         for args in [
             vec!["init", "--quiet", "--initial-branch", "main"],
             vec!["config", "user.email", "test@example.invalid"],
-            vec!["config", "user.name", "skillmgr tests"],
+            vec!["config", "user.name", "pollen tests"],
             vec!["config", "commit.gpgsign", "false"],
             vec!["config", "tag.gpgsign", "false"],
             vec!["add", "."],

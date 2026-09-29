@@ -1,4 +1,4 @@
-//! The unit skillmgr deploys: a directory holding a `SKILL.md` whose YAML
+//! The unit pollen deploys: a directory holding a `SKILL.md` whose YAML
 //! frontmatter follows the Agent Skills specification.
 
 use std::collections::BTreeMap;
@@ -64,7 +64,7 @@ pub enum SkillError {
 ///
 /// Unknown keys are kept out of this struct on purpose: agents extend the
 /// frontmatter with their own fields (`model`, `argument-hint`, `paths`, …)
-/// and rejecting those would make skillmgr refuse perfectly good skills.
+/// and rejecting those would make pollen refuse perfectly good skills.
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct Frontmatter {
     /// Skill identifier, and the directory name it must be stored under.

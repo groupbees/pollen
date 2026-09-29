@@ -41,18 +41,18 @@ repos:
         types:
           - rust
 
-      - id: skillmgr-validate
-        name: validate the example skillmgr config
+      - id: pollen-validate
+        name: validate the example pollen config
         entry: cargo run --quiet -- validate --config-only
         language: system
-        files: ^examples/skillmgr\.yaml$
+        files: ^examples/pollen\.yaml$
 
-      - id: skillmgr-schema
+      - id: pollen-schema
         name: regenerate the config JSON Schema
         entry: scripts/generate-schema.sh
         language: system
         pass_filenames: false
-        files: ^(src/config\.rs|src/schema\.rs|schema/skillmgr\.schema\.json)$
+        files: ^(src/config\.rs|src/schema\.rs|schema/pollen\.schema\.json)$
 
       - id: shellcheck
         name: shellcheck

@@ -59,8 +59,8 @@ jobs:
         shell: bash
     env:
       TARGET: ${{ matrix.target }}
-      ARCHIVE: skillmgr-${{ matrix.target }}-v${{ needs.version.outputs.version }}
-      BINARY: skillmgr${{ endsWith(matrix.target, '-windows-msvc') && '.exe' || '' }}
+      ARCHIVE: pollen-${{ matrix.target }}-v${{ needs.version.outputs.version }}
+      BINARY: pollen${{ endsWith(matrix.target, '-windows-msvc') && '.exe' || '' }}
       FORMAT: ${{ endsWith(matrix.target, '-windows-msvc') && 'zip' || 'tar.gz' }}
     steps:
       - name: check out the repository

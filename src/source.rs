@@ -71,8 +71,8 @@ impl Materializer for Fetcher {
 #[must_use]
 pub fn default_cache_dir() -> PathBuf {
     dirs::cache_dir().map_or_else(
-        || PathBuf::from(".skillmgr-cache"),
-        |cache| cache.join("skillmgr"),
+        || PathBuf::from(".pollen-cache"),
+        |cache| cache.join("pollen"),
     )
 }
 

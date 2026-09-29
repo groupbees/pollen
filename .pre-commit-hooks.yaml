@@ -1,15 +1,15 @@
 # Hooks this repository publishes. Consume them from another repo with:
 #
-#   - repo: https://github.com/groupbees/skillmgr
+#   - repo: https://github.com/groupbees/pollen
 #     rev: v0.1.0
 #     hooks:
-#       - id: skillmgr-validate
-- id: skillmgr-validate
-  name: validate the skillmgr config
+#       - id: pollen-validate
+- id: pollen-validate
+  name: validate the pollen config
   description: >-
-    Check that every skillmgr.yaml parses and satisfies its rules. Fetches
-    nothing, so the hook stays fast and works offline; run `skillmgr validate`
+    Check that every pollen.yaml parses and satisfies its rules. Fetches
+    nothing, so the hook stays fast and works offline; run `pollen validate`
     without --config-only to also check the skills the sources yield.
-  entry: skillmgr validate --config-only
+  entry: pollen validate --config-only
   language: rust
-  files: (^|/)skillmgr\.ya?ml$
+  files: (^|/)pollen\.ya?ml$

@@ -1,4 +1,4 @@
-//! `skillmgr list`: what is deployed in the target directories.
+//! `pollen list`: what is deployed in the target directories.
 
 use anyhow::Result;
 

@@ -1,5 +1,5 @@
-//! The JSON Schema for `skillmgr.yaml`, published so editors and other tools
-//! can validate a config without running skillmgr.
+//! The JSON Schema for `pollen.yaml`, published so editors and other tools
+//! can validate a config without running pollen.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -8,12 +8,12 @@ use crate::config::Config;
 
 /// Where the published schema is served from.
 pub const SCHEMA_ID: &str =
-    "https://raw.githubusercontent.com/groupbees/skillmgr/main/schema/skillmgr.schema.json";
+    "https://raw.githubusercontent.com/groupbees/pollen/main/schema/pollen.schema.json";
 
 /// Path of the copy committed to this repository.
-pub const SCHEMA_PATH: &str = "schema/skillmgr.schema.json";
+pub const SCHEMA_PATH: &str = "schema/pollen.schema.json";
 
-/// Build the JSON Schema document describing `skillmgr.yaml`.
+/// Build the JSON Schema document describing `pollen.yaml`.
 #[must_use]
 pub fn document() -> Value {
     let mut schema = schemars::schema_for!(Config);
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn accepts_the_documented_example() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/skillmgr.yaml");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/pollen.yaml");
         let example = yaml(&std::fs::read_to_string(path).unwrap());
 
         let errors: Vec<String> = validator()

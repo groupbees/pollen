@@ -85,7 +85,7 @@
       "type": "object"
     }
   },
-  "$id": "https://raw.githubusercontent.com/groupbees/skillmgr/main/schema/skillmgr.schema.json",
+  "$id": "https://raw.githubusercontent.com/groupbees/pollen/main/schema/pollen.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Declares where Agent Skills come from and which directories they are deployed into.",
@@ -113,6 +113,6 @@
   "required": [
     "repos"
   ],
-  "title": "skillmgr configuration",
+  "title": "pollen configuration",
   "type": "object"
 }

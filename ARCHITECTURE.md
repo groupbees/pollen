@@ -2,7 +2,7 @@
 
 ## Overview
 
-`skillmgr` is a one-shot CLI. A run reads `skillmgr.yaml`, makes every source
+`pollen` is a one-shot CLI. A run reads `pollen.yaml`, makes every source
 it declares available on the local filesystem, works out which skill
 directories those sources select, and then makes each target directory match
 that set — installing, replacing and removing as needed. The sources are
@@ -12,7 +12,7 @@ left behind between runs except a git cache and one state file per target.
 
 ```mermaid
 flowchart LR
-    yaml[skillmgr.yaml] -->|parse + validate| config[config]
+    yaml[pollen.yaml] -->|parse + validate| config[config]
     config -->|per repo| source[source]
     source -->|git clone/fetch, sync| cache[(git cache)]
     source -->|root directory| discovery[discovery]
@@ -28,7 +28,7 @@ flowchart LR
 
 Each maps to a module under [src/](src/).
 
-- **[config](src/config.rs)** — owns the schema of `skillmgr.yaml` and every
+- **[config](src/config.rs)** — owns the schema of `pollen.yaml` and every
   rule about it: a git source is pinned to a revision, `local` is not, a
   `path` never climbs out of its source, an `exclude` compiles as a regular
   expression. It resolves the target directories from the CLI overrides, the
@@ -44,7 +44,7 @@ Each maps to a module under [src/](src/).
   which directories a `paths:` entry selects. A directory holding a `SKILL.md`
   is a skill and is never descended into, so a skill that bundles reference
   material does not spawn phantom children.
-- **[schema](src/schema.rs)** — derives the JSON Schema for `skillmgr.yaml`
+- **[schema](src/schema.rs)** — derives the JSON Schema for `pollen.yaml`
   from the same types [config](src/config.rs) deserialises, so the published
   schema cannot describe a file the parser would reject. It states the shape;
   the cross-field and semantic rules stay in `config`, which is why a config
@@ -57,7 +57,7 @@ Each maps to a module under [src/](src/).
   install is staged in a sibling directory and moved in with a rename, and a
   replacement moves the previous version aside first so a failed rename can be
   undone.
-- **[state](src/state.rs)** — the record of what `skillmgr` installed in one
+- **[state](src/state.rs)** — the record of what `pollen` installed in one
   target directory, and the only thing that authorises it to replace or remove
   something. Each target carries its own, so targets never reason about each
   other.
@@ -91,22 +91,22 @@ installed and stay recorded, in the targets already processed as well as the
 one that failed — the run is not a transaction, and does not pretend to be.
 What cannot happen is a partially copied skill in a target:
 the rename is the only step that makes an install visible. A run killed
-between the copy and the rename leaves a `.skillmgr-staging-*` directory,
+between the copy and the rename leaves a `.pollen-staging-*` directory,
 which the next run sweeps.
 
 ## State and persistence
 
 Two stores, both disposable.
 
-- **The git cache**, at `$SKILLMGR_CACHE_DIR` (`<user cache>/skillmgr` by default), one
+- **The git cache**, at `$POLLEN_CACHE_DIR` (`<user cache>/pollen` by default), one
   checkout per `(url, revision)`. Keying on the revision as well as the URL is
   what lets one config pin two revisions of the same repository without the
   two checkouts fighting. Deleting the cache costs a refetch and nothing else.
-- **The state file**, `.skillmgr.json` inside each target directory, mapping
+- **The state file**, `.pollen.json` inside each target directory, mapping
   each installed skill name to its source, revision, resolved commit and tree
   fingerprint. It lives with what it describes rather than next to the config,
   because the config is shared and version-controlled while what is on disk is
-  a property of this machine. Deleting it makes `skillmgr` forget it owns
+  a property of this machine. Deleting it makes `pollen` forget it owns
   those skills: the next `update` then refuses to replace them without
   `--force`.
 
@@ -122,7 +122,7 @@ users have git by definition. `gix` loses for the same reason as libgit2, and
 fetching tarballs over HTTP loses because every forge shapes those URLs
 differently and none of them resolves a branch to a commit.
 
-**Plain skill directories, not a package format.** The unit `skillmgr`
+**Plain skill directories, not a package format.** The unit `pollen`
 deploys is exactly what the Agent Skills specification describes, copied
 verbatim, which is why one deployment serves every agent that reads the format
 rather than one vendor's plugin mechanism. Generating a plugin marketplace
@@ -143,9 +143,9 @@ installed, a tool either refuses to remove anything (leaving orphans forever)
 or removes whatever is not declared (eating hand-written skills). The state
 file is what makes pruning safe.
 
-**Environment variables carry a `SKILLMGR_` prefix.** The usual rule is that
+**Environment variables carry a `POLLEN_` prefix.** The usual rule is that
 a process owns its environment and takes bare names, and it does not hold for
-a CLI: skillmgr runs in a shell shared with everything else, and its knobs are
+a CLI: pollen runs in a shell shared with everything else, and its knobs are
 exactly the generic words — `FORCE`, `DRY_RUN`, `OFFLINE`, `CONFIG_FILE` —
 that something else has already exported. An inherited `FORCE=1` would turn a
 refusal to overwrite a hand-written skill into an overwrite. The bare names
@@ -167,9 +167,9 @@ an error naming the file.
 - Every target directory holds a full, independent copy of the deployed set.
   No target is derived from another, and none is a link into another.
 - A skill's frontmatter `name` equals its directory name, and that name is
-  what it deploys under. The specification requires the first; `skillmgr`
+  what it deploys under. The specification requires the first; `pollen`
   enforces it rather than renaming around it.
-- `skillmgr` only ever replaces or removes a directory recorded in the state
+- `pollen` only ever replaces or removes a directory recorded in the state
   file. `--force` is the single, explicit way to take over one that is not.
 - A `paths:` entry never resolves outside its source root, before or after
   symlink resolution.
