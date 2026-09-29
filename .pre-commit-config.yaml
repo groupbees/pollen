@@ -8,6 +8,7 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+        exclude: ^docs/package-lock\.json$
       - id: check-merge-conflict
       - id: detect-private-key
 
@@ -60,3 +61,17 @@ repos:
         language: system
         types:
           - shell
+
+      - id: docs-biome
+        name: biome check the documentation site
+        entry: npm --prefix docs run lint
+        language: system
+        pass_filenames: false
+        files: ^docs/
+
+      - id: docs-astro-check
+        name: astro check the documentation site
+        entry: npm --prefix docs run check
+        language: system
+        pass_filenames: false
+        files: ^docs/

@@ -1,0 +1,47 @@
+---
+import Default from "@astrojs/starlight/components/SocialIcons.astro";
+import { buildEnv, SITE_BASE } from "../build-env.ts";
+import { joinBase } from "../versions.ts";
+
+const { versions, current, base } = buildEnv;
+const options = versions.map((v) => ({
+	value: joinBase(SITE_BASE, v.path),
+	label: v.latest ? `${v.label} (latest)` : v.label,
+	selected: v.label === current?.label,
+}));
+---
+
+{
+	options.length > 1 && (
+		<select class="version-picker" aria-label="Documentation version" data-current-base={base}>
+			{options.map((o) => (
+				<option value={o.value} selected={o.selected}>
+					{o.label}
+				</option>
+			))}
+		</select>
+	)
+}
+<Default />
+
+<script>
+	import { switchVersion } from "../switch-version.ts";
+
+	for (const picker of document.querySelectorAll<HTMLSelectElement>(".version-picker")) {
+		picker.addEventListener("change", () => {
+			const currentBase = picker.dataset.currentBase ?? "/";
+			location.pathname = switchVersion(location.pathname, currentBase, picker.value);
+		});
+	}
+</script>
+
+<style>
+	.version-picker {
+		background-color: var(--sl-color-bg-nav);
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.25rem;
+		color: var(--sl-color-gray-2);
+		font-size: var(--sl-text-sm);
+		padding: 0.25rem 0.5rem;
+	}
+</style>

@@ -1,0 +1,31 @@
+/* The logo's navy #234D65 and teal #61E6D0, with grays tinted by the navy's
+   hue. Link text: teal on the dark background, navy on the light one. */
+
+:root {
+	--sl-color-accent-low: #234d65;
+	--sl-color-accent: #2fa894;
+	--sl-color-accent-high: #61e6d0;
+	--sl-color-white: #ffffff;
+	--sl-color-gray-1: #e6e8ef;
+	--sl-color-gray-2: #b8c5ce;
+	--sl-color-gray-3: #7d93a2;
+	--sl-color-gray-4: #4c6272;
+	--sl-color-gray-5: #2e4453;
+	--sl-color-gray-6: #1c2f3b;
+	--sl-color-black: #11202a;
+}
+
+:root[data-theme="light"] {
+	--sl-color-accent-low: #c4f5ec;
+	--sl-color-accent: #234d65;
+	--sl-color-accent-high: #17344a;
+	--sl-color-white: #11202a;
+	--sl-color-gray-1: #1c2f3b;
+	--sl-color-gray-2: #2e4453;
+	--sl-color-gray-3: #4c6272;
+	--sl-color-gray-4: #7d93a2;
+	--sl-color-gray-5: #b8c5ce;
+	--sl-color-gray-6: #e6e8ef;
+	--sl-color-gray-7: #f3f5f8;
+	--sl-color-black: #ffffff;
+}
