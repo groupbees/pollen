@@ -103,6 +103,15 @@ the version picker and the link rewriting:
 npm --prefix docs test
 ```
 
+The Homebrew formula generator is checked against a fabricated `SHA256SUMS`
+by a script that renders the formula, runs `brew style` and `brew audit` on it
+in a throwaway local tap, and checks that a missing archive is refused. It
+needs [Homebrew](https://brew.sh) on `PATH`:
+
+```sh
+tests/homebrew-formula.sh
+```
+
 New behaviour comes with tests, and a fix comes with the regression test that
 would have caught it.
 
@@ -153,17 +162,22 @@ commit gate stays fast.
 
 | Workflow | Triggers on | What it does | Reproduce locally |
 | --- | --- | --- | --- |
-| [quality.yaml](.github/workflows/quality.yaml) | every push to `main`, every pull request | `pre-commit run --all-files` on Linux, `cargo test --all-targets --locked` on both Linux (`ubuntu-24.04`) and Windows (`windows-2025`), and the documentation site's tests | `pre-commit run --all-files`, `cargo test --all-targets --locked` and `npm --prefix docs test`; for Windows, `cargo clippy --all-targets --target x86_64-pc-windows-msvc -- -D warnings` type-checks the Windows code paths from any host |
+| [quality.yaml](.github/workflows/quality.yaml) | every push to `main`, every pull request | `pre-commit run --all-files` on Linux, `cargo test --all-targets --locked` on both Linux (`ubuntu-24.04`) and Windows (`windows-2025`), the documentation site's tests, and the Homebrew formula check on macOS | `pre-commit run --all-files`, `cargo test --all-targets --locked`, `npm --prefix docs test` and `tests/homebrew-formula.sh`; for Windows, `cargo clippy --all-targets --target x86_64-pc-windows-msvc -- -D warnings` type-checks the Windows code paths from any host |
 | [docs.yaml](.github/workflows/docs.yaml) | pushes to `main` and pull requests touching `docs/`, `assets/` or the workflow; manual | Builds every version of the documentation site, links validated; on `main`, deploys it to GitHub Pages | `git fetch --tags` then `npm --prefix docs run build:versions` |
 | [security.yaml](.github/workflows/security.yaml) | every push to `main`, every pull request, daily, manual | `trivy fs` over the repo, failing on fixable `HIGH`/`CRITICAL`, and a second non-blocking scan uploaded to code scanning | `trivy fs .` |
-| [release.yaml](.github/workflows/release.yaml) | tag `v*` | Checks the tag against `Cargo.toml`, builds the `.tar.gz` archives for Linux (musl, x86_64 and arm64) and macOS (arm64 and x86_64) and the `.zip` archives for Windows (MSVC, x86_64 and arm64, each on its native runner), creates the GitHub release with a `SHA256SUMS` over all of them and notes starting from the previous stable tag, then runs `docs` on `main` so the site's root serves the new release. A pre-release tag (`v0.2.0-rc1`) builds the archives and keeps them as workflow artifacts, without a release page | — |
+| [release.yaml](.github/workflows/release.yaml) | tag `v*` | Checks the tag against `Cargo.toml`, builds the `.tar.gz` archives for Linux (musl, x86_64 and arm64) and macOS (arm64 and x86_64) and the `.zip` archives for Windows (MSVC, x86_64 and arm64, each on its native runner), creates the GitHub release with a `SHA256SUMS` over all of them and notes starting from the previous stable tag, installs and tests the Homebrew formula rendered from that `SHA256SUMS` and pushes it to [groupbees/homebrew-tap](https://github.com/groupbees/homebrew-tap), then runs `docs` on `main` so the site's root serves the new release. A pre-release tag (`v0.2.0-rc1`) builds the archives and keeps them as workflow artifacts, without a release page | — |
 
 `quality` and `security` are the checks that block a merge; `docs` is
 path-filtered, so it is never a required check. `release` has no local
 equivalent: it publishes, and it runs only from a tag.
 
-It needs no secrets. `release` uses the workflow's own `GITHUB_TOKEN` with
-`contents: write`, scoped to the job that creates the release; `security`
+`release`'s `homebrew` job is the only one that reaches outside this
+repository: it pushes to `groupbees/homebrew-tap` with a token minted from a
+GitHub App installed on that repository with `contents: write`, whose client
+ID is the `HOMEBREW_TAP_CLIENT_ID` repository variable and whose private key
+is the `HOMEBREW_TAP_PRIVATE_KEY` secret. Everything else uses the workflow's
+own `GITHUB_TOKEN`: `release` holds `contents: write` in the job that creates
+the release; `security`
 holds `security-events: write` for the SARIF upload and nothing else. The
 `docs` deploy job holds `pages: write` and `id-token: write`, and `release`'s
 `docs` job `actions: write` to start it. Pages deploys only from `main`, in

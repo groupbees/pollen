@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install the pollen binary from a release archive or from source.
+description: Install the pollen binary with Homebrew, from a release archive or from source.
 sidebar:
   order: 1
 ---
@@ -9,6 +9,17 @@ sidebar:
 
 - `git`, on `PATH` — `pollen` shells out to it for every remote source.
 - Rust ≥ 1.97.1, only to build from source.
+
+## Homebrew
+
+On macOS and Linux:
+
+```sh
+brew install groupbees/tap/pollen
+```
+
+The formula installs the release archive for your platform, so nothing is
+compiled; `brew upgrade` picks up each new release.
 
 ## Release archives
 
