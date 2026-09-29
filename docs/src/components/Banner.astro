@@ -1,0 +1,35 @@
+---
+import Default from "@astrojs/starlight/components/Banner.astro";
+import { buildEnv, SITE_BASE } from "../build-env.ts";
+
+const { current } = buildEnv;
+const notice =
+	current === undefined || current.latest
+		? undefined
+		: current.label === "next"
+			? "You are reading the documentation of the unreleased development version."
+			: `You are reading the documentation of an older release, ${current.label}.`;
+---
+
+{
+	notice && (
+		<div class="sl-banner version-banner" data-pagefind-ignore>
+			{notice} <a href={SITE_BASE}>Go to the latest release.</a>
+		</div>
+	)
+}
+<Default />
+
+<style>
+	.version-banner {
+		padding: var(--sl-nav-pad-y) var(--sl-nav-pad-x);
+		background-color: var(--sl-color-bg-accent);
+		color: var(--sl-color-text-invert);
+		line-height: var(--sl-line-height-headings);
+		text-align: center;
+		text-wrap: balance;
+	}
+	.version-banner a {
+		color: inherit;
+	}
+</style>

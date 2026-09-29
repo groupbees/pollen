@@ -24,3 +24,23 @@ updates:
         update-types:
           - patch
           - minor
+
+  - package-ecosystem: npm
+    directory: /docs
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+    groups:
+      patch-and-minor:
+        update-types:
+          - patch
+          - minor
+    ignore:
+      # @astrojs/check accepts TypeScript ^5 || ^6 only; a newer major fails npm ci.
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
