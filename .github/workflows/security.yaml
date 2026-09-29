@@ -6,8 +6,9 @@ on:
       - main
   pull_request:
   schedule:
-    # CVEs are disclosed against code nobody touched, so re-scan weekly.
-    - cron: "17 4 * * 1"
+    # CVEs are disclosed against code nobody touched, so re-scan daily.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -53,7 +54,8 @@ jobs:
           cache: true
 
       - name: upload the SARIF report
-        uses: github/codeql-action/upload-sarif@a35ac6e6798d72df5475948b28efb89edc2e19ca  # v4.37.9
+        uses: github/codeql-action/upload-sarif@88585263c0627ee42c0e1c5143a112c8d6f4aa18  # v4.38.2
         if: always()
         with:
           sarif_file: trivy.sarif
+          category: trivy-fs
