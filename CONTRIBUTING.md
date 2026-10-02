@@ -117,7 +117,10 @@ would have caught it.
 
 ## Pre-commit hooks
 
-`pre-commit install` puts the gate in place; the hooks must pass before a push.
+`pre-commit install` puts the gate in place, for both the `pre-commit` and
+the `commit-msg` stages; the hooks must pass before a push. In a clone where
+pre-commit was installed before the `commit-msg` hook existed, run it once
+more.
 
 The whole repo:
 
@@ -144,6 +147,7 @@ pre-commit run cargo-clippy --all-files
 | `shellcheck` | The scripts in [scripts/](scripts/) | Fix the script |
 | `docs-biome` | Biome lint and format of the site, per [docs/biome.json](docs/biome.json) | `npm --prefix docs run format` |
 | `docs-astro-check` | Types and page frontmatter of the site | Fix the file it names |
+| `no-co-authors` | The commit message carries no `Co-Authored-By:` trailer and no `Generated with` line; runs at `commit-msg`, so `--all-files` and CI skip it | Rewrite the message |
 
 [.pre-commit-hooks.yaml](.pre-commit-hooks.yaml) at the repository root is a
 different file with a confusingly similar name: it declares the hook *other*

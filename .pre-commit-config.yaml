@@ -1,5 +1,13 @@
 # The test suite is deliberately absent: it runs in the `quality` workflow,
 # not on every commit.
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
+# Without this, every hook also runs at commit-msg, against the message file.
+default_stages:
+  - pre-commit
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -27,6 +35,15 @@ repos:
 
   - repo: local
     hooks:
+      - id: no-co-authors
+        name: no co-authors in commit message
+        entry: '^\s*co-authored-by:|\bgenerated with\b'
+        language: pygrep
+        args:
+          - --ignore-case
+        stages:
+          - commit-msg
+
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --check --
