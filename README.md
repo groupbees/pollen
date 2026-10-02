@@ -42,7 +42,13 @@ models.
 
 ### Installation
 
-Download the archive for your platform from the
+With [Homebrew](https://brew.sh), on macOS and Linux:
+
+```sh
+brew install groupbees/tap/pollen
+```
+
+Otherwise, download the archive for your platform from the
 [releases](https://github.com/groupbees/pollen/releases) and put `pollen` on
 your `PATH`, or build it from source with Rust ≥ 1.97.1:
 

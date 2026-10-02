@@ -70,6 +70,18 @@ jobs:
       - name: run the test suite
         run: cargo test --all-targets --locked
 
+  homebrew-formula:
+    name: homebrew formula
+    runs-on: macos-15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - name: check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: check the rendered formula
+        run: tests/homebrew-formula.sh
+
   docs-test:
     name: docs test
     runs-on: ubuntu-24.04

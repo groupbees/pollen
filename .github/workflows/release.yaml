@@ -141,6 +141,73 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes \
             ${PREVIOUS:+--notes-start-tag "$PREVIOUS"} artifacts/*
 
+  homebrew:
+    name: homebrew
+    needs:
+      - version
+      - publish
+    runs-on: macos-15
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      CHECK_TAP: pollen-release/formula-check
+    steps:
+      - name: check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: render the formula from the release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS
+          scripts/homebrew-formula.sh "$VERSION" SHA256SUMS > pollen.rb
+
+      # Homebrew only installs formulae that live in a tap, so the check runs in
+      # a throwaway local one before anything reaches the real tap.
+      - name: install and test the formula
+        run: |
+          brew tap-new --no-git "$CHECK_TAP"
+          cp pollen.rb "$(brew --repository "$CHECK_TAP")/Formula/pollen.rb"
+          brew audit --strict --formula "$CHECK_TAP/pollen"
+          brew install --formula "$CHECK_TAP/pollen"
+          brew test "$CHECK_TAP/pollen"
+
+      - name: create a token for the tap
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.HOMEBREW_TAP_CLIENT_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: check out the tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ steps.token.outputs.token }}
+          path: tap
+
+      - name: push the formula to the tap
+        working-directory: tap
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        run: |
+          mkdir -p Formula
+          cp ../pollen.rb Formula/pollen.rb
+          git add Formula/pollen.rb
+          if git diff --cached --quiet; then
+            echo "the tap already has pollen ${VERSION}."
+            exit 0
+          fi
+          user_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git commit --message "pollen ${VERSION}"
+          git push
+
   # The root of the site now serves this release, and Pages deploys from the
   # default branch only, so the docs are rebuilt there rather than from the tag.
   docs:
