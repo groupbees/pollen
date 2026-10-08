@@ -130,6 +130,14 @@ pub enum Command {
         /// the skills the sources would yield.
         #[arg(long, env = "POLLEN_CONFIG_ONLY")]
         config_only: bool,
+
+        /// Also require every git source to be pinned to a full commit SHA.
+        ///
+        /// A tag can be moved and a branch moves on every push; a commit
+        /// cannot. Keep the tag readable in a comment:
+        /// `revision: <sha>  # v1.2.3`. Works offline, with `--config-only`.
+        #[arg(long, env = "POLLEN_PINNED")]
+        pinned: bool,
     },
 
     /// Print the JSON Schema for `pollen.yaml`.

@@ -143,6 +143,17 @@ impl Config {
         Ok(config)
     }
 
+    /// The git sources whose `revision` is not a full commit id.
+    #[must_use]
+    pub fn unpinned(&self) -> Vec<&RepoSpec> {
+        self.repos
+            .iter()
+            .filter(|repo| {
+                matches!(repo.source(), Source::Git { revision, .. } if !is_commit_id(&revision))
+            })
+            .collect()
+    }
+
     /// The directories to deploy into: the CLI overrides, else the config's
     /// `targets`, else `defaults`.
     ///
@@ -208,6 +219,13 @@ impl PathSpec {
             })
             .transpose()
     }
+}
+
+/// Whether `revision` is a full commit id — SHA-1 or SHA-256 — which no push
+/// can move, unlike a branch or a tag.
+#[must_use]
+pub fn is_commit_id(revision: &str) -> bool {
+    matches!(revision.len(), 40 | 64) && revision.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// The user-level config `--global` reads: `pollen/pollen.yaml` in the
@@ -521,6 +539,28 @@ mod tests {
             config.file,
             dir.path().join("pollen.yaml").canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn a_commit_id_is_forty_or_sixty_four_hex_digits() {
+        assert!(is_commit_id("acad0f52027cf8f8edf7bfa6a55e13c594d8ee71"));
+        assert!(is_commit_id(&"ab".repeat(32)));
+        assert!(!is_commit_id("v0.1.0"));
+        assert!(!is_commit_id("main"));
+        assert!(!is_commit_id("acad0f5"));
+        assert!(!is_commit_id(&"g".repeat(40)));
+    }
+
+    #[test]
+    fn lists_the_git_sources_not_pinned_to_a_commit() {
+        let config = parse(
+            "repos:\n  - repo: https://example.invalid/a.git\n    revision: acad0f52027cf8f8edf7bfa6a55e13c594d8ee71\n    paths:\n      - path: .\n  - repo: https://example.invalid/b.git\n    revision: v1.0.0\n    paths:\n      - path: .\n  - repo: local\n    paths:\n      - path: .\n",
+        )
+        .unwrap();
+
+        let unpinned: Vec<String> = config.unpinned().iter().map(|repo| repo.label()).collect();
+
+        assert_eq!(unpinned, ["https://example.invalid/b.git@v1.0.0"]);
     }
 
     #[test]

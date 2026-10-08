@@ -29,6 +29,22 @@ Check config files alone, fetching nothing:
 pollen validate --config-only pollen.yaml
 ```
 
+Require every git source to be pinned to a full commit SHA, offline:
+
+```sh
+pollen validate --config-only --pinned
+```
+
+A branch moves on every push and a tag can be moved; a commit cannot. Pin the
+commit and keep the tag readable in a comment, which a bot such as Renovate can
+keep up to date:
+
+```yaml
+revision: acad0f52027cf8f8edf7bfa6a55e13c594d8ee71  # v0.1.0
+```
+
+Whatever the flags, `update` and `validate` warn when a revision is a branch.
+
 List what is currently deployed:
 
 ```sh

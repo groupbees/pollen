@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
 use super::Materialized;
+use crate::config::is_commit_id;
 
 /// Check `revision` of `url` out into the cache, and say where it landed.
 ///
@@ -51,6 +52,12 @@ pub async fn checkout(
                 format!("`{revision}` does not name a commit, tag or branch in {url}")
             }
         })?;
+
+    if !offline && !is_commit_id(revision) && names_a_branch(&repo_dir, revision).await {
+        tracing::warn!(
+            "{url}: `{revision}` is a branch, so each update deploys whatever it points to now; pin a tag or a commit"
+        );
+    }
 
     git(
         &repo_dir,
@@ -159,6 +166,33 @@ async fn resolve(repo_dir: &Path, revision: &str, fetched: Fetch) -> Result<Stri
     }
 
     bail!("no local ref matches `{revision}`")
+}
+
+/// Whether the remote has a branch named `revision` and no tag of that name.
+///
+/// Asked of the remote because a pinned fetch leaves no local ref behind to
+/// tell the two apart. A failed query is not worth failing the run over.
+async fn names_a_branch(repo_dir: &Path, revision: &str) -> bool {
+    let refs = match git(
+        repo_dir,
+        &["ls-remote", "--heads", "--tags", "origin", revision],
+    )
+    .await
+    {
+        Ok(refs) => refs,
+        Err(error) => {
+            tracing::debug!(%revision, "cannot list the remote refs: {error:#}");
+            return false;
+        }
+    };
+    let names: Vec<&str> = refs
+        .lines()
+        .filter_map(|line| line.split('\t').nth(1))
+        .collect();
+    let branch = format!("refs/heads/{revision}");
+    let tag = format!("refs/tags/{revision}");
+    names.contains(&branch.as_str())
+        && !names.iter().any(|name| name.trim_end_matches("^{}") == tag)
 }
 
 fn command(repo_dir: &Path, args: &[&str]) -> Command {
@@ -273,6 +307,21 @@ mod tests {
         let offline = checkout(url, "v1.0.0", cache.path(), true).await.unwrap();
 
         assert!(offline.root.join("skills/demo/SKILL.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn tells_a_branch_from_a_tag() {
+        let origin = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        seed_repository(origin.path());
+        let url = origin.path().to_str().unwrap();
+
+        let branch = checkout(url, "main", cache.path(), false).await.unwrap();
+        let tag = checkout(url, "v1.0.0", cache.path(), false).await.unwrap();
+
+        assert!(names_a_branch(&branch.root, "main").await);
+        assert!(!names_a_branch(&tag.root, "v1.0.0").await);
+        assert!(!names_a_branch(&tag.root, "nothing").await);
     }
 
     fn seed_repository(root: &Path) {

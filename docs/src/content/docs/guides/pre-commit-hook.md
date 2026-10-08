@@ -20,3 +20,11 @@ Pin `rev` to a released tag. The hook runs on every `pollen.yaml` a commit
 touches and checks that it parses and its rules hold. It fetches nothing, so
 it stays fast and works offline — and therefore says nothing about the skills
 those sources would yield. Run [`pollen validate`](/guides/usage/) for that, in CI or by hand.
+
+To require every git source to be pinned to a commit, pass `--pinned`:
+
+```yaml
+      - id: pollen-validate
+        args:
+          - --pinned
+```
