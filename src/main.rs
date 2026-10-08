@@ -34,5 +34,9 @@ async fn run(cli: &Cli) -> Result<()> {
             pinned,
         } => command::validate::run(cli, configs, *config_only, *pinned).await,
         Command::Schema => command::schema::run(),
+        Command::Outdated => command::outdated::run(cli).await,
+        Command::Autoupdate { freeze, dry_run } => {
+            command::autoupdate::run(cli, *freeze, *dry_run).await
+        }
     }
 }

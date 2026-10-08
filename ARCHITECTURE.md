@@ -63,6 +63,11 @@ Each maps to a module under [src/](src/).
   target directory, and the only thing that authorises it to replace or remove
   something. Each target carries its own, so targets never reason about each
   other.
+- **[version](src/version.rs)** — which of a remote's tags are releases
+  (stable `vX.Y.Z`), which is newest, and which one a revision stands for.
+  `outdated` and `autoupdate` read the tags with `git ls-remote`, without
+  fetching; `autoupdate` rewrites the `revision:` lines in place rather than
+  re-serialising the YAML, so comments and layout survive.
 - **[command](src/command.rs)** — the subcommands. `validate` has two depths:
   the config file alone, which touches no network and is what the published
   pre-commit hook runs, and the full check that fetches every source and reads

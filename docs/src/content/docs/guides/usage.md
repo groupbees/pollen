@@ -45,6 +45,26 @@ revision: acad0f52027cf8f8edf7bfa6a55e13c594d8ee71  # v0.1.0
 
 Whatever the flags, `update` and `validate` warn when a revision is a branch.
 
+See which sources have a newer release, from the remotes' tags:
+
+```sh
+pollen outdated
+```
+
+Move every source to its newest release, rewriting only the `revision:` lines
+of `pollen.yaml` — comments and layout are kept, and the file is written only
+if it still validates:
+
+```sh
+pollen autoupdate --dry-run
+pollen autoupdate
+```
+
+`--freeze` pins each source to the commit of its release instead, with the
+release in a comment (`revision: <sha>  # v0.2.0`); run on an up-to-date tag,
+it only freezes it. Only stable `vX.Y.Z` or `X.Y.Z` tags count as releases,
+and a branch revision is left alone.
+
 List what is currently deployed:
 
 ```sh

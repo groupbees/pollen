@@ -142,6 +142,24 @@ pub enum Command {
 
     /// Print the JSON Schema for `pollen.yaml`.
     Schema,
+
+    /// Show which git sources have a newer release than the one pinned.
+    Outdated,
+
+    /// Move every git source to its newest release, rewriting `pollen.yaml`.
+    ///
+    /// Only `revision:` lines change; comments and layout are kept, and the
+    /// file is written only if it still validates.
+    Autoupdate {
+        /// Pin each source to the commit of its release, with the release in a
+        /// trailing comment: `revision: <sha>  # v1.2.3`.
+        #[arg(long, env = "POLLEN_FREEZE")]
+        freeze: bool,
+
+        /// Show what would change without writing the file.
+        #[arg(long, env = "POLLEN_DRY_RUN")]
+        dry_run: bool,
+    },
 }
 
 #[cfg(test)]
