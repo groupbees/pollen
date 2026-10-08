@@ -11,3 +11,4 @@ pub mod shutdown;
 pub mod skill;
 pub mod source;
 pub mod state;
+pub mod version;

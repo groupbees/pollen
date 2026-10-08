@@ -9,6 +9,7 @@ use tokio::process::Command;
 
 use super::Materialized;
 use crate::config::is_commit_id;
+use crate::version::{RemoteTag, parse_ls_remote};
 
 /// Check `revision` of `url` out into the cache, and say where it landed.
 ///
@@ -168,6 +169,21 @@ async fn resolve(repo_dir: &Path, revision: &str, fetched: Fetch) -> Result<Stri
     bail!("no local ref matches `{revision}`")
 }
 
+/// Every tag `url` publishes, peeled to its commit, without fetching anything.
+///
+/// `dir` is where `git` runs, so a relative path to a local repository
+/// resolves the way the config meant it.
+///
+/// # Errors
+///
+/// When `git` is missing or the remote cannot be reached.
+pub async fn remote_tags(url: &str, dir: &Path) -> Result<Vec<RemoteTag>> {
+    let output = git(dir, &["ls-remote", "--tags", url])
+        .await
+        .with_context(|| format!("cannot list the tags of {url}"))?;
+    Ok(parse_ls_remote(&output))
+}
+
 /// Whether the remote has a branch named `revision` and no tag of that name.
 ///
 /// Asked of the remote because a pinned fetch leaves no local ref behind to
@@ -307,6 +323,21 @@ mod tests {
         let offline = checkout(url, "v1.0.0", cache.path(), true).await.unwrap();
 
         assert!(offline.root.join("skills/demo/SKILL.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn lists_the_remote_tags_with_their_commits() {
+        let origin = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        seed_repository(origin.path());
+        let url = origin.path().to_str().unwrap();
+        let checked_out = checkout(url, "v1.0.0", cache.path(), false).await.unwrap();
+
+        let tags = remote_tags(url, cache.path()).await.unwrap();
+
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "v1.0.0");
+        assert_eq!(Some(&tags[0].commit), checked_out.resolved.as_ref());
     }
 
     #[tokio::test]

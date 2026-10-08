@@ -1,6 +1,8 @@
 //! The subcommand implementations.
 
+pub mod autoupdate;
 pub mod list;
+pub mod outdated;
 pub mod plan;
 pub mod schema;
 pub mod update;
