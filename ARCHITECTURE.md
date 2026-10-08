@@ -106,7 +106,8 @@ Two stores, both disposable.
   two checkouts fighting. Deleting the cache costs a refetch and nothing else.
 - **The state file**, `.pollen.json` inside each target directory, mapping
   each installed skill name to its source, revision, resolved commit and tree
-  fingerprint. It lives with what it describes rather than next to the config,
+  fingerprint, and naming the config file that owns the directory. It lives
+  with what it describes rather than next to the config,
   because the config is shared and version-controlled while what is on disk is
   a property of this machine. Deleting it makes `pollen` forget it owns
   those skills: the next `update` then refuses to replace them without
@@ -173,6 +174,11 @@ an error naming the file.
   enforces it rather than renaming around it.
 - `pollen` only ever replaces or removes a directory recorded in the state
   file. `--force` is the single, explicit way to take over one that is not.
+- A target directory has one owning config. An update prunes whatever its
+  config does not declare, so a second config would delete the first one's
+  skills; `update` refuses a target whose recorded config still exists, and
+  `--force` hands the directory over. A recorded config that is gone (the
+  project moved) is not an owner any more and is replaced silently.
 - A `paths:` entry never resolves outside its source root, before or after
   symlink resolution.
 - An install becomes visible in one rename. There is no window in which the

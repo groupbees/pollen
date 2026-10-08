@@ -200,13 +200,23 @@ pub async fn update(
 
     let mut summaries = Vec::with_capacity(targets.len());
     for target in targets {
-        summaries.push(apply(&plan.skills, target, dry_run, force)?);
+        summaries.push(apply(&plan.skills, &config.file, target, dry_run, force)?);
     }
     Ok(Report { summaries })
 }
 
-fn apply(skills: &[Planned], target: &Path, dry_run: bool, force: bool) -> Result<Summary> {
+fn apply(
+    skills: &[Planned],
+    config_file: &Path,
+    target: &Path,
+    dry_run: bool,
+    force: bool,
+) -> Result<Summary> {
     let mut state = State::load(target)?;
+    check_owner(&state, config_file, target, force)?;
+    if !config_file.as_os_str().is_empty() {
+        state.config = Some(config_file.to_path_buf());
+    }
     if !dry_run {
         std::fs::create_dir_all(target)
             .with_context(|| format!("cannot create {}", target.display()))?;
@@ -233,6 +243,31 @@ fn apply(skills: &[Planned], target: &Path, dry_run: bool, force: bool) -> Resul
         changes,
         dry_run,
     })
+}
+
+/// Refuse a target another config still manages, unless `force` hands it over.
+///
+/// A recorded config that no longer exists is not an owner any more — the
+/// project was moved or renamed — and a state written before configs were
+/// recorded has none: both are adopted silently.
+fn check_owner(state: &State, config_file: &Path, target: &Path, force: bool) -> Result<()> {
+    let Some(owner) = &state.config else {
+        return Ok(());
+    };
+    if force
+        || config_file.as_os_str().is_empty()
+        || owner == config_file
+        || state.skills.is_empty()
+        || !owner.is_file()
+    {
+        return Ok(());
+    }
+    bail!(
+        "{} is managed by another config, {}; pollen keeps one config per target directory, since an update removes what its config does not declare. Declare these sources in that config, or pass --force to hand the directory over to {}",
+        target.display(),
+        owner.display(),
+        config_file.display()
+    )
 }
 
 /// Install every planned skill into `target`, then remove the ones the config
@@ -363,6 +398,7 @@ mod tests {
                 })
                 .collect(),
             base_dir: PathBuf::new(),
+            file: PathBuf::new(),
         }
     }
 
@@ -504,6 +540,131 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(target.path().join("demo/SKILL.md")).unwrap(),
             "handwritten"
+        );
+    }
+
+    /// A config read from `name`, a real file in `dir`.
+    fn config_owned_by(dir: &Path, name: &str) -> Config {
+        let file = dir.join(name);
+        std::fs::write(&file, "").unwrap();
+        Config {
+            file: file.canonicalize().unwrap(),
+            ..config_with(1)
+        }
+    }
+
+    #[tokio::test]
+    async fn records_the_config_that_owns_the_target() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let config = config_owned_by(configs.path(), "a.yaml");
+        let mock = materializer(source.path());
+
+        update(&config, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            State::load(target.path()).unwrap().config,
+            Some(config.file)
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_a_target_another_config_manages() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let first = config_owned_by(configs.path(), "a.yaml");
+        let second = config_owned_by(configs.path(), "b.yaml");
+        let mock = materializer(source.path());
+
+        update(&first, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap();
+        let error = update(&second, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("managed by another config"), "{error}");
+        assert_eq!(State::load(target.path()).unwrap().config, Some(first.file));
+    }
+
+    #[tokio::test]
+    async fn hands_a_target_over_to_another_config_when_forced() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let first = config_owned_by(configs.path(), "a.yaml");
+        let second = config_owned_by(configs.path(), "b.yaml");
+        let mock = materializer(source.path());
+
+        update(&first, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap();
+        update(&second, &one(target.path()), &mock, false, true)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            State::load(target.path()).unwrap().config,
+            Some(second.file)
+        );
+    }
+
+    #[tokio::test]
+    async fn adopts_a_target_whose_config_no_longer_exists() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let moved = config_owned_by(configs.path(), "old.yaml");
+        let current = config_owned_by(configs.path(), "new.yaml");
+        let mock = materializer(source.path());
+
+        update(&moved, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap();
+        std::fs::remove_file(&moved.file).unwrap();
+        let summary = update(&current, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap();
+
+        assert_eq!(actions(&summary), [(Action::Unchanged, "demo")]);
+        assert_eq!(
+            State::load(target.path()).unwrap().config,
+            Some(current.file)
+        );
+    }
+
+    #[tokio::test]
+    async fn adopts_a_state_written_before_owners_were_recorded() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let config = config_owned_by(configs.path(), "a.yaml");
+        let mock = materializer(source.path());
+        update(&config, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap();
+        let mut legacy = State::load(target.path()).unwrap();
+        legacy.config = None;
+        legacy.save(target.path()).unwrap();
+
+        let summary = update(&config, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap();
+
+        assert_eq!(actions(&summary), [(Action::Unchanged, "demo")]);
+        assert_eq!(
+            State::load(target.path()).unwrap().config,
+            Some(config.file)
         );
     }
 
