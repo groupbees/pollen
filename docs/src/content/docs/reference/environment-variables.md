@@ -15,4 +15,4 @@ Every option is also an environment variable:
 | `POLLEN_OFFLINE` | no | `false` | Work from the cache only, contacting no remote. |
 | `POLLEN_DRY_RUN` | no | `false` | Report what `update` would change, and stop. |
 | `POLLEN_FORCE` | no | `false` | Let `update` take over a directory it did not install. |
-| `POLLEN_LOG_FILTER` | no | `info` | `tracing` filter directive, e.g. `pollen=debug`. |
+| `POLLEN_LOG_FILTER` | no | `warn` | `tracing` filter directive, e.g. `info` to follow each skill as it is installed, or `pollen=debug`. |
