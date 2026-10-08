@@ -99,7 +99,7 @@
       "type": "array"
     },
     "targets": {
-      "description": "Directories the skills are deployed into, each getting a full copy.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded. Defaults to `.claude/skills` and `.agents/skills`.",
+      "description": "Directories the skills are deployed into, each getting a full copy.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded. Defaults to `.claude/skills` and `.agents/skills`, or\nto `~/.claude/skills` and `~/.agents/skills` with `--global`.",
       "items": {
         "type": "string"
       },

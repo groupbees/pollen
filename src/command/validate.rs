@@ -21,7 +21,7 @@ use crate::command::plan;
 /// skill breaks the Agent Skills specification.
 pub async fn run(cli: &Cli, configs: &[PathBuf], config_only: bool) -> Result<()> {
     let paths: Vec<PathBuf> = if configs.is_empty() {
-        vec![cli.config.clone()]
+        vec![cli.config_path()]
     } else {
         configs.to_vec()
     };

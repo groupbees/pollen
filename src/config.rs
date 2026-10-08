@@ -1,6 +1,7 @@
 //! The declarative input: `pollen.yaml`, its schema, and its validation.
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -15,6 +16,10 @@ use validator::{Validate, ValidationError};
 /// every other Agent Skills client scans, so one deployment serves both.
 pub const DEFAULT_TARGETS: [&str; 2] = [".claude/skills", ".agents/skills"];
 
+/// Where skills land with `--global` when neither the CLI nor the config says
+/// otherwise: the same pair, in the user's home.
+pub const GLOBAL_DEFAULT_TARGETS: [&str; 2] = ["~/.claude/skills", "~/.agents/skills"];
+
 /// The sentinel `repo:` value meaning "paths are relative to this config file".
 pub const LOCAL_REPO: &str = "local";
 
@@ -26,7 +31,8 @@ pub struct Config {
     /// Directories the skills are deployed into, each getting a full copy.
     ///
     /// A relative path resolves against the working directory, and a leading
-    /// `~` is expanded. Defaults to `.claude/skills` and `.agents/skills`.
+    /// `~` is expanded. Defaults to `.claude/skills` and `.agents/skills`, or
+    /// to `~/.claude/skills` and `~/.agents/skills` with `--global`.
     #[validate(length(min = 1, message = "at least one target is required"))]
     #[schemars(length(min = 1))]
     pub targets: Option<Vec<PathBuf>>,
@@ -128,15 +134,16 @@ impl Config {
         Ok(config)
     }
 
-    /// The directories to deploy into, CLI overrides taking precedence.
+    /// The directories to deploy into: the CLI overrides, else the config's
+    /// `targets`, else `defaults`.
     ///
     /// Duplicates are dropped so a directory named twice is written once.
     #[must_use]
-    pub fn targets(&self, overrides: &[PathBuf]) -> Vec<PathBuf> {
+    pub fn targets(&self, overrides: &[PathBuf], defaults: &[&str]) -> Vec<PathBuf> {
         let chosen = if overrides.is_empty() {
             self.targets
                 .clone()
-                .unwrap_or_else(|| DEFAULT_TARGETS.iter().map(PathBuf::from).collect())
+                .unwrap_or_else(|| defaults.iter().map(PathBuf::from).collect())
         } else {
             overrides.to_vec()
         };
@@ -192,6 +199,39 @@ impl PathSpec {
             })
             .transpose()
     }
+}
+
+/// The user-level config `--global` reads: `pollen/pollen.yaml` in the
+/// user's configuration directory.
+#[must_use]
+pub fn global_config_path() -> PathBuf {
+    user_config_dir(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        dirs::home_dir(),
+        dirs::config_dir(),
+    )
+    .join("pollen")
+    .join("pollen.yaml")
+}
+
+/// The user's configuration directory: an absolute `$XDG_CONFIG_HOME` wins
+/// everywhere (a relative one is ignored, as the XDG spec says), then the
+/// platform's own directory on Windows (`%APPDATA%`), else `~/.config` — on
+/// macOS too, where CLI tools follow XDG rather than `~/Library`.
+fn user_config_dir(
+    xdg: Option<OsString>,
+    home: Option<PathBuf>,
+    platform: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(xdg) = xdg.map(PathBuf::from).filter(|dir| dir.is_absolute()) {
+        return xdg;
+    }
+    let fallback = if cfg!(windows) {
+        platform
+    } else {
+        home.map(|home| home.join(".config"))
+    };
+    fallback.unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Replace a leading `~` with the user's home directory.
@@ -373,7 +413,7 @@ mod tests {
         let config = parse("repos:\n  - repo: local\n    paths:\n      - path: .\n").unwrap();
 
         assert_eq!(
-            config.targets(&[]),
+            config.targets(&[], &DEFAULT_TARGETS),
             [
                 PathBuf::from(".claude/skills"),
                 PathBuf::from(".agents/skills")
@@ -389,10 +429,71 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            config.targets(&[PathBuf::from("/tmp/override")]),
+            config.targets(&[PathBuf::from("/tmp/override")], &DEFAULT_TARGETS),
             [PathBuf::from("/tmp/override")]
         );
-        assert_eq!(config.targets(&[]), [PathBuf::from("/opt/skills")]);
+        assert_eq!(
+            config.targets(&[], &DEFAULT_TARGETS),
+            [PathBuf::from("/opt/skills")]
+        );
+    }
+
+    #[test]
+    fn global_targets_default_to_the_home_directory() {
+        let config = parse("repos:\n  - repo: local\n    paths:\n      - path: .\n").unwrap();
+        let home = dirs::home_dir().unwrap();
+
+        assert_eq!(
+            config.targets(&[], &GLOBAL_DEFAULT_TARGETS),
+            [home.join(".claude/skills"), home.join(".agents/skills")]
+        );
+    }
+
+    #[test]
+    fn an_absolute_xdg_config_home_wins() {
+        let xdg = std::env::temp_dir().join("xdg");
+
+        assert_eq!(
+            user_config_dir(
+                Some(xdg.clone().into_os_string()),
+                Some(PathBuf::from("/home/me")),
+                None
+            ),
+            xdg
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_xdg_config_home_is_ignored_for_dot_config() {
+        assert_eq!(
+            user_config_dir(
+                Some(OsString::from("relative")),
+                Some(PathBuf::from("/home/me")),
+                Some(PathBuf::from("/home/me/Library/Application Support"))
+            ),
+            PathBuf::from("/home/me/.config")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn falls_back_to_appdata_on_windows() {
+        let appdata = PathBuf::from(r"C:\Users\me\AppData\Roaming");
+
+        assert_eq!(
+            user_config_dir(
+                None,
+                Some(PathBuf::from(r"C:\Users\me")),
+                Some(appdata.clone())
+            ),
+            appdata
+        );
+    }
+
+    #[test]
+    fn the_global_config_is_pollen_yaml_in_a_pollen_directory() {
+        assert!(global_config_path().ends_with("pollen/pollen.yaml"));
     }
 
     #[test]
@@ -400,7 +501,10 @@ mod tests {
         let config = parse("repos:\n  - repo: local\n    paths:\n      - path: .\n").unwrap();
         let repeated = vec![PathBuf::from("skills"), PathBuf::from("skills")];
 
-        assert_eq!(config.targets(&repeated), [PathBuf::from("skills")]);
+        assert_eq!(
+            config.targets(&repeated, &DEFAULT_TARGETS),
+            [PathBuf::from("skills")]
+        );
     }
 
     #[test]
