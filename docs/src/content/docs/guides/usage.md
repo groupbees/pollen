@@ -102,6 +102,16 @@ remove the first one's skills. `pollen update` therefore refuses a directory
 another config manages and names that config; declare the sources there, or
 pass `--force` to hand the directory over.
 
+Give your agents the pollen skill, so they edit `pollen.yaml`, pin sources and
+fix pollen's errors the way this guide describes — add it as a source:
+
+```yaml
+  - repo: https://github.com/groupbees/pollen
+    revision: <sha>  # vX.Y.Z
+    paths:
+      - path: skills
+```
+
 Refresh from the cache on a plane:
 
 ```sh

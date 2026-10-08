@@ -93,6 +93,32 @@ The other commands are in
 hook that validates a `pollen.yaml` in
 [Pre-commit hook](https://groupbees.github.io/pollen/guides/pre-commit-hook/).
 
+### Pinning, and why there is no lockfile
+
+Pin each source to the commit of a release and keep the tag in a comment:
+
+```yaml
+revision: 4e1e8e25a2f32d8311cd52c5d9a703bad990e525  # v0.2.0
+```
+
+A commit cannot move, and pollen resolves no version ranges and no transitive
+dependencies, so the pinned `pollen.yaml` is the lock — no separate lockfile.
+`pollen autoupdate --freeze` bumps the pins, `pollen outdated` shows newer
+releases, and `pollen validate --pinned` enforces the convention.
+
+### Teach your agents pollen
+
+pollen ships an Agent Skill, [`skills/pollen`](skills/pollen/SKILL.md), so the
+agents in your projects know how to edit a `pollen.yaml`, pin a source and fix
+pollen's errors. Install it with pollen itself:
+
+```yaml
+  - repo: https://github.com/groupbees/pollen
+    revision: <sha>  # vX.Y.Z
+    paths:
+      - path: skills
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
