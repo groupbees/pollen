@@ -21,6 +21,11 @@ const CURRENT_VERSION: u32 = 1;
 pub struct State {
     /// Schema version of this file.
     pub version: u32,
+    /// The config file that deploys into this directory. One target has one
+    /// owner: an update prunes whatever its config does not declare, so a
+    /// second config would remove the first one's skills.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<PathBuf>,
     /// Installed skills, keyed by the name they are deployed under.
     pub skills: BTreeMap<String, InstalledSkill>,
 }
@@ -45,6 +50,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             version: CURRENT_VERSION,
+            config: None,
             skills: BTreeMap::new(),
         }
     }
@@ -141,6 +147,14 @@ mod tests {
         let reloaded = State::load(target.path()).unwrap();
 
         assert_eq!(reloaded.skills["demo"], entry());
+    }
+
+    #[test]
+    fn reads_a_state_file_without_an_owner() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(State::path(target.path()), r#"{"version":1,"skills":{}}"#).unwrap();
+
+        assert_eq!(State::load(target.path()).unwrap().config, None);
     }
 
     #[test]

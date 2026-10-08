@@ -43,6 +43,10 @@ pub struct Config {
     /// Directory holding the config file; local paths resolve against it.
     #[serde(skip)]
     pub base_dir: PathBuf,
+    /// Absolute path of the config file, recorded as the owner of every
+    /// target it deploys into. Empty for a config not read from a file.
+    #[serde(skip)]
+    pub file: PathBuf,
 }
 
 /// One source of skills: a git repository, or the config file's own directory.
@@ -131,6 +135,11 @@ impl Config {
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or(Path::new("."))
             .to_path_buf();
+        // Canonical, so `../pollen.yaml` from a subdirectory and a symlinked
+        // path name the same owner as the plain path.
+        config.file = path
+            .canonicalize()
+            .with_context(|| format!("cannot resolve {}", path.display()))?;
         Ok(config)
     }
 
@@ -494,6 +503,24 @@ mod tests {
     #[test]
     fn the_global_config_is_pollen_yaml_in_a_pollen_directory() {
         assert!(global_config_path().ends_with("pollen/pollen.yaml"));
+    }
+
+    #[test]
+    fn records_the_canonical_path_of_the_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(
+            dir.path().join("pollen.yaml"),
+            "repos:\n  - repo: local\n    paths:\n      - path: .\n",
+        )
+        .unwrap();
+
+        let config = Config::load(&dir.path().join("sub/../pollen.yaml")).unwrap();
+
+        assert_eq!(
+            config.file,
+            dir.path().join("pollen.yaml").canonicalize().unwrap()
+        );
     }
 
     #[test]

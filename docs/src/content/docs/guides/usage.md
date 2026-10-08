@@ -60,9 +60,11 @@ pollen update --global
 with every command (`pollen list -g`, `pollen validate -g`) and cannot be
 combined with `--config`.
 
-Keep one user-level config for those directories: an update prunes whatever
-its config no longer declares, so a second config deploying into
-`~/.claude/skills` would remove the first one's skills.
+A target directory belongs to one config: an update prunes whatever its config
+no longer declares, so a second config deploying into the same directory would
+remove the first one's skills. `pollen update` therefore refuses a directory
+another config manages and names that config; declare the sources there, or
+pass `--force` to hand the directory over.
 
 Refresh from the cache on a plane:
 
