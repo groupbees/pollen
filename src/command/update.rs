@@ -214,8 +214,39 @@ fn apply(skills: &[Planned], target: &Path, dry_run: bool, force: bool) -> Resul
     }
 
     let mut changes = Vec::new();
+    let reconciled = reconcile(skills, target, &mut state, &mut changes, dry_run, force);
+
+    // Saved whatever happened: a skill installed before a failure is on disk,
+    // and an unrecorded one would be refused as unmanaged by the next run.
+    // When both fail, the reconcile error is the one returned, and the save
+    // error is logged rather than lost.
+    if !dry_run && let Err(error) = state.save(target) {
+        if reconciled.is_ok() {
+            return Err(error);
+        }
+        tracing::error!("{error:#}");
+    }
+    reconciled?;
+
+    Ok(Summary {
+        target: target.to_path_buf(),
+        changes,
+        dry_run,
+    })
+}
+
+/// Install every planned skill into `target`, then remove the ones the config
+/// no longer selects, recording each step in `state` and `changes` as it lands.
+fn reconcile(
+    skills: &[Planned],
+    target: &Path,
+    state: &mut State,
+    changes: &mut Vec<Change>,
+    dry_run: bool,
+    force: bool,
+) -> Result<()> {
     for planned in skills {
-        let action = install(target, &mut state, planned, dry_run, force)?;
+        let action = install(target, state, planned, dry_run, force)?;
         changes.push(Change {
             action,
             name: planned.name.clone(),
@@ -246,16 +277,7 @@ fn apply(skills: &[Planned], target: &Path, dry_run: bool, force: bool) -> Resul
             origin: String::new(),
         });
     }
-
-    if !dry_run {
-        state.save(target)?;
-    }
-
-    Ok(Summary {
-        target: target.to_path_buf(),
-        changes,
-        dry_run,
-    })
+    Ok(())
 }
 
 fn install(
@@ -482,6 +504,34 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(target.path().join("demo/SKILL.md")).unwrap(),
             "handwritten"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failure_part_way_keeps_what_was_installed_recorded() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "alpha", "Installed before the failure.");
+        write_skill(source.path(), "beta", "Blocked by a handwritten directory.");
+        std::fs::create_dir_all(target.path().join("beta")).unwrap();
+        std::fs::write(target.path().join("beta/SKILL.md"), "handwritten").unwrap();
+        let config = config_with(1);
+        let mock = materializer(source.path());
+
+        update(&config, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap_err();
+        let recorded = State::load(target.path()).unwrap();
+        std::fs::remove_dir_all(target.path().join("beta")).unwrap();
+        let retry = update(&config, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap();
+
+        assert!(recorded.skills.contains_key("alpha"));
+        assert!(!recorded.skills.contains_key("beta"));
+        assert_eq!(
+            actions(&retry),
+            [(Action::Unchanged, "alpha"), (Action::Added, "beta")]
         );
     }
 
