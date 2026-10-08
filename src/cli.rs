@@ -45,11 +45,15 @@ pub struct Cli {
 
     /// `tracing` filter directive (e.g. `info`, `pollen=debug`).
     ///
+    /// Warnings and errors only by default: the summary on stdout already
+    /// lists every skill, so `info` adds a second line per skill. Pass `info`
+    /// to follow an update as it runs.
+    ///
     /// Syntax: <https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives>
     #[arg(
         long = "log-filter",
         env = "POLLEN_LOG_FILTER",
-        default_value = "info",
+        default_value = "warn",
         global = true
     )]
     pub log_filter: String,
@@ -101,6 +105,19 @@ mod tests {
 
     fn targets(value: &str) -> Vec<PathBuf> {
         Cli::parse_from(["pollen", "--target", value, "list"]).targets
+    }
+
+    #[test]
+    fn logs_only_warnings_and_errors_by_default() {
+        // Read from the definition, so an exported POLLEN_LOG_FILTER cannot
+        // change the outcome.
+        let command = <Cli as clap::CommandFactory>::command();
+        let log_filter = command
+            .get_arguments()
+            .find(|argument| argument.get_id() == "log_filter")
+            .unwrap();
+
+        assert_eq!(log_filter.get_default_values(), ["warn"]);
     }
 
     #[cfg(unix)]

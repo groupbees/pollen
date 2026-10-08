@@ -54,5 +54,7 @@ pollen update --offline
 ```
 
 The result goes to stdout and the diagnostics to stderr, so
-`pollen update > changes.txt` keeps both readable. Every flag also has an
+`pollen update > changes.txt` keeps both readable. Only warnings and errors
+reach stderr by default; `--log-filter info` also logs each skill as it is
+installed or removed. Every flag also has an
 [environment variable](/reference/environment-variables/).
