@@ -27,7 +27,7 @@ impl Context {
     ///
     /// When the config file cannot be read, parsed or validated.
     pub fn open(cli: &Cli) -> anyhow::Result<Self> {
-        Self::open_at(cli, &cli.config)
+        Self::open_at(cli, &cli.config_path())
     }
 
     /// Load a named config file and resolve the target directories.
@@ -37,7 +37,7 @@ impl Context {
     /// When the config file cannot be read, parsed or validated.
     pub fn open_at(cli: &Cli, config_path: &std::path::Path) -> anyhow::Result<Self> {
         let config = Config::load(config_path)?;
-        let targets = config.targets(&cli.targets);
+        let targets = config.targets(&cli.targets, cli.default_targets());
         tracing::debug!(
             targets = ?targets,
             config = %config_path.display(),

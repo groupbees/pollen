@@ -23,7 +23,7 @@ repos:
 
 | Key | Required | Default | Description |
 | --- | --- | --- | --- |
-| `targets` | no | `.claude/skills` and `.agents/skills` | Directories the skills are deployed into, each getting a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory. |
+| `targets` | no | `.claude/skills` and `.agents/skills`; with `--global`, `~/.claude/skills` and `~/.agents/skills` | Directories the skills are deployed into, each getting a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. |
 | `repos[].repo` | yes | — | A git URL, a path to a git repository, or `local` for the directory holding the config file. |
 | `repos[].revision` | for git | — | Tag, branch or commit to check out. Forbidden on `local`. |
 | `repos[].paths[].path` | yes | — | Directory to search, relative to the source root. Write it with `/`, which every platform reads. |
@@ -38,7 +38,8 @@ a config can be shared without its sources moving. See
 for a commented config.
 
 Set `targets` yourself to deploy elsewhere — a single directory, or the
-user-level pair:
+user-level pair, which is also what `--global` uses when the user-level config
+sets none:
 
 ```yaml
 targets:

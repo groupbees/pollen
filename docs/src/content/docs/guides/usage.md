@@ -47,6 +47,23 @@ Deploy somewhere else, for this run only:
 pollen update --target ~/.claude/skills --target ~/.agents/skills
 ```
 
+Deploy the skills you want in every project, from your user-level config:
+
+```sh
+pollen update --global
+```
+
+`--global` (`-g`) reads `$XDG_CONFIG_HOME/pollen/pollen.yaml` —
+`~/.config/pollen/pollen.yaml` when the variable is unset, on macOS too, and
+`%APPDATA%\pollen\pollen.yaml` on Windows — and, when that file sets no
+`targets`, deploys into `~/.claude/skills` and `~/.agents/skills`. It works
+with every command (`pollen list -g`, `pollen validate -g`) and cannot be
+combined with `--config`.
+
+Keep one user-level config for those directories: an update prunes whatever
+its config no longer declares, so a second config deploying into
+`~/.claude/skills` would remove the first one's skills.
+
 Refresh from the cache on a plane:
 
 ```sh

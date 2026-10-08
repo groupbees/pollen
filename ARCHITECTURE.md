@@ -32,7 +32,9 @@ Each maps to a module under [src/](src/).
   rule about it: a git source is pinned to a revision, `local` is not, a
   `path` never climbs out of its source, an `exclude` compiles as a regular
   expression. It resolves the target directories from the CLI overrides, the
-  config, then the default pair, dropping duplicates. It knows nothing about
+  config, then the default pair (in the working directory, or in the home
+  directory with `--global`, which also reads the user-level config),
+  dropping duplicates. It knows nothing about
   git or the filesystem beyond reading its own file.
 - **[source](src/source.rs)** — turns one `repos:` entry into a directory on
   disk, behind the `Materializer` trait. `local` resolves to the config

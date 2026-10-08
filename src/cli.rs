@@ -23,6 +23,20 @@ pub struct Cli {
     )]
     pub config: PathBuf,
 
+    /// Use the user-level config and deploy into the user's skill directories.
+    ///
+    /// Reads `$XDG_CONFIG_HOME/pollen/pollen.yaml` (`~/.config/pollen/pollen.yaml`
+    /// when unset, `%APPDATA%\pollen\pollen.yaml` on Windows); when it sets no
+    /// `targets`, the skills go to `~/.claude/skills` and `~/.agents/skills`.
+    #[arg(
+        long,
+        short = 'g',
+        env = "POLLEN_GLOBAL",
+        conflicts_with = "config",
+        global = true
+    )]
+    pub global: bool,
+
     /// Directory to deploy into, overriding the config's `targets`.
     ///
     /// Repeat the flag for several directories. The environment variable
@@ -61,6 +75,29 @@ pub struct Cli {
     /// What to do.
     #[command(subcommand)]
     pub command: Command,
+}
+
+impl Cli {
+    /// The config file to read: the user-level one with `--global`, else
+    /// `--config`.
+    #[must_use]
+    pub fn config_path(&self) -> PathBuf {
+        if self.global {
+            crate::config::global_config_path()
+        } else {
+            self.config.clone()
+        }
+    }
+
+    /// Where skills land when neither the CLI nor the config names a target.
+    #[must_use]
+    pub fn default_targets(&self) -> &'static [&'static str] {
+        if self.global {
+            &crate::config::GLOBAL_DEFAULT_TARGETS
+        } else {
+            &crate::config::DEFAULT_TARGETS
+        }
+    }
 }
 
 /// The subcommands pollen exposes.
@@ -118,6 +155,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(log_filter.get_default_values(), ["warn"]);
+    }
+
+    #[test]
+    fn global_reads_the_user_level_config_and_targets() {
+        let cli = Cli::parse_from(["pollen", "--global", "update"]);
+
+        assert_eq!(cli.config_path(), crate::config::global_config_path());
+        assert_eq!(cli.default_targets(), crate::config::GLOBAL_DEFAULT_TARGETS);
+    }
+
+    #[test]
+    fn global_and_an_explicit_config_are_mutually_exclusive() {
+        let result = Cli::try_parse_from(["pollen", "-g", "--config", "other.yaml", "update"]);
+
+        assert!(result.is_err());
     }
 
     #[cfg(unix)]
