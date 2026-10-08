@@ -170,6 +170,14 @@ specification stops the whole run rather than being installed and ignored by
 the agent later. A skill that is silently not loaded is a worse outcome than
 an error naming the file.
 
+**No lockfile.** A lockfile exists to freeze what a resolver chose: version
+ranges and transitive dependencies. pollen has neither — a `revision` names one
+thing, and a skill depends on nothing — so the commit pinned in `pollen.yaml`
+already is the lock. The convention is the commit of a release with the tag in
+a comment (`revision: <sha>  # v1.2.3`): `autoupdate --freeze` writes it,
+`validate --pinned` enforces it, and Renovate can bump it like any other pinned
+digest. A second file would only repeat the config, and could disagree with it.
+
 ## Invariants and constraints
 
 - Every target directory holds a full, independent copy of the deployed set.
@@ -206,6 +214,6 @@ an error naming the file.
 - Skills are copied, not symlinked, so editing a deployed skill does not edit
   its source, and the next `update` overwrites the edit.
 - A source is fetched over the network on every `update` unless `--offline`
-  is passed. There is no notion of a lock file freezing resolved commits.
+  is passed.
 - Only regular files and directories are copied; a symlink inside a skill is
   skipped with a warning.
