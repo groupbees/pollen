@@ -19,7 +19,7 @@ use crate::command::plan;
 ///
 /// When a config file is invalid, a source cannot be fetched, or a selected
 /// skill breaks the Agent Skills specification.
-pub async fn run(cli: &Cli, configs: &[PathBuf], config_only: bool) -> Result<()> {
+pub async fn run(cli: &Cli, configs: &[PathBuf], config_only: bool, pinned: bool) -> Result<()> {
     let paths: Vec<PathBuf> = if configs.is_empty() {
         vec![cli.config_path()]
     } else {
@@ -27,12 +27,12 @@ pub async fn run(cli: &Cli, configs: &[PathBuf], config_only: bool) -> Result<()
     };
 
     if let [only] = paths.as_slice() {
-        return check(cli, only, config_only).await;
+        return check(cli, only, config_only, pinned).await;
     }
 
     let mut failures = 0_usize;
     for path in &paths {
-        if let Err(error) = check(cli, path, config_only).await {
+        if let Err(error) = check(cli, path, config_only, pinned).await {
             tracing::error!("{error:#}");
             failures += 1;
         }
@@ -45,8 +45,24 @@ pub async fn run(cli: &Cli, configs: &[PathBuf], config_only: bool) -> Result<()
     }
 }
 
-async fn check(cli: &Cli, path: &Path, config_only: bool) -> Result<()> {
+async fn check(cli: &Cli, path: &Path, config_only: bool, pinned: bool) -> Result<()> {
     let context = Context::open_at(cli, path)?;
+
+    if pinned {
+        let loose = context.config.unpinned();
+        if !loose.is_empty() {
+            let list = loose
+                .iter()
+                .map(|repo| repo.label())
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!(
+                "{}: {} source(s) not pinned to a commit: {list}. Pin each `revision` to a full commit SHA; keep the tag in a comment: `revision: <sha>  # v1.2.3`",
+                path.display(),
+                loose.len()
+            );
+        }
+    }
 
     if config_only {
         println!(

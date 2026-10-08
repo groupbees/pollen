@@ -31,7 +31,8 @@ async fn run(cli: &Cli) -> Result<()> {
         Command::Validate {
             configs,
             config_only,
-        } => command::validate::run(cli, configs, *config_only).await,
+            pinned,
+        } => command::validate::run(cli, configs, *config_only, *pinned).await,
         Command::Schema => command::schema::run(),
     }
 }

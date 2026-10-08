@@ -25,7 +25,7 @@ repos:
 | --- | --- | --- | --- |
 | `targets` | no | `.claude/skills` and `.agents/skills`; with `--global`, `~/.claude/skills` and `~/.agents/skills` | Directories the skills are deployed into, each getting a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. |
 | `repos[].repo` | yes | — | A git URL, a path to a git repository, or `local` for the directory holding the config file. |
-| `repos[].revision` | for git | — | Tag, branch or commit to check out. Forbidden on `local`. |
+| `repos[].revision` | for git | — | Tag, branch or commit to check out. A branch draws a warning, since each update deploys whatever it points to then; a full commit SHA is the only revision that cannot move (`pollen validate --pinned` enforces it). Forbidden on `local`. |
 | `repos[].paths[].path` | yes | — | Directory to search, relative to the source root. Write it with `/`, which every platform reads. |
 | `repos[].paths[].recurse` | no | `false` | Search the whole subtree instead of the immediate children. |
 | `repos[].paths[].exclude` | no | — | Regular expression rejecting skills whose path under `path` matches. |

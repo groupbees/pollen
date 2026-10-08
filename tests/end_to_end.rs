@@ -202,12 +202,13 @@ async fn run_validate(args: &[&str]) -> anyhow::Result<()> {
     let pollen::cli::Command::Validate {
         configs,
         config_only,
+        pinned,
     } = &cli.command
     else {
         panic!("not a validate invocation");
     };
-    let (configs, config_only) = (configs.clone(), *config_only);
-    pollen::command::validate::run(&cli, &configs, config_only).await
+    let (configs, config_only, pinned) = (configs.clone(), *config_only, *pinned);
+    pollen::command::validate::run(&cli, &configs, config_only, pinned).await
 }
 
 fn write_config(dir: &Path, name: &str, body: &str) -> String {
@@ -299,4 +300,35 @@ async fn validation_reports_a_config_that_does_not_exist() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn pinned_validation_requires_a_commit_on_every_git_source() {
+    let workspace = tempfile::tempdir().unwrap();
+    let pinned = write_config(
+        workspace.path(),
+        "pinned.yaml",
+        "repos:\n  - repo: https://example.invalid/x.git\n    revision: acad0f52027cf8f8edf7bfa6a55e13c594d8ee71  # v0.1.0\n    paths:\n      - path: .\n  - repo: local\n    paths:\n      - path: skills\n",
+    );
+    let tagged = write_config(
+        workspace.path(),
+        "tagged.yaml",
+        "repos:\n  - repo: https://example.invalid/x.git\n    revision: v0.1.0\n    paths:\n      - path: .\n",
+    );
+
+    assert!(
+        run_validate(&["validate", "--config-only", "--pinned", &pinned])
+            .await
+            .is_ok()
+    );
+    assert!(
+        run_validate(&["validate", "--config-only", &tagged])
+            .await
+            .is_ok()
+    );
+    let error = run_validate(&["validate", "--config-only", "--pinned", &tagged])
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("not pinned to a commit"), "{error}");
 }
