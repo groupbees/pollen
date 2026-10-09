@@ -102,6 +102,11 @@ remove the first one's skills. `pollen update` therefore refuses a directory
 another config manages and names that config; declare the sources there, or
 pass `--force` to hand the directory over.
 
+Managed names in `.pollen.json` follow the same rules as skill names. A path such
+as `../outside` refuses that target before installing, pruning or sweeping
+staging material. Preserve the state file and review the invalid record before
+another attempt. Neither `--force` nor `--dry-run` bypasses this validation.
+
 Give your agents the pollen skill, so they edit `pollen.yaml`, pin sources and
 fix pollen's errors the way this guide describes — add it as a source:
 
