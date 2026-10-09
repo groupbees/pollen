@@ -543,6 +543,65 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn refuses_unsafe_state_before_installing_pruning_or_sweeping() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("target");
+        let outside = root.path().join("outside");
+        write_skill(source.path(), "alpha", "Ordinary declared skill.");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let sentinel = outside.join("retained.txt");
+        std::fs::write(&sentinel, "preserve outside bytes").unwrap();
+        let leftovers: Vec<_> = [deploy::STAGING_PREFIX, deploy::REPLACED_PREFIX]
+            .into_iter()
+            .map(|prefix| {
+                let directory = target.join(format!("{prefix}retained"));
+                std::fs::create_dir(&directory).unwrap();
+                let sentinel = directory.join("retained.txt");
+                std::fs::write(&sentinel, "preserve interrupted update bytes").unwrap();
+                sentinel
+            })
+            .collect();
+        let original_state = serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "skills": {
+                "../outside": {
+                    "repo": "local",
+                    "revision": null,
+                    "commit": null,
+                    "sourcePath": "skills/retired",
+                    "checksum": "sha256:00"
+                }
+            }
+        }))
+        .unwrap();
+        std::fs::write(State::path(&target), &original_state).unwrap();
+        let config = config_with(1);
+        let mock = materializer(source.path());
+
+        for dry_run in [false, true] {
+            for force in [false, true] {
+                let result = update(&config, &one(&target), &mock, dry_run, force).await;
+
+                assert!(result.is_err(), "unsafe state must refuse before mutation");
+                assert_eq!(
+                    std::fs::read_to_string(&sentinel).unwrap(),
+                    "preserve outside bytes"
+                );
+                assert_eq!(std::fs::read(State::path(&target)).unwrap(), original_state);
+                assert!(!target.join("alpha").exists());
+                for leftover in &leftovers {
+                    assert_eq!(
+                        std::fs::read_to_string(leftover).unwrap(),
+                        "preserve interrupted update bytes"
+                    );
+                }
+            }
+        }
+    }
+
     /// A config read from `name`, a real file in `dir`.
     fn config_owned_by(dir: &Path, name: &str) -> Config {
         let file = dir.join(name);
