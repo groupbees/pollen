@@ -1,6 +1,6 @@
 ---
 name: pollen
-description: How to install and pin Agent Skills with pollen (pollen.yaml → .claude/skills and .agents/skills). Trigger when creating or editing a pollen.yaml, adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning).
+description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml, adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning).
 ---
 
 # pollen
@@ -8,6 +8,24 @@ description: How to install and pin Agent Skills with pollen (pollen.yaml → .c
 pollen makes skills directories match a `pollen.yaml`: it installs what is
 declared, refreshes what changed and removes what was dropped. It only touches
 directories it installed itself, recorded in `.pollen.json` in each target.
+
+## Install and upgrade pollen
+
+The same command installs and upgrades; it replaces the binary in place, so
+`PATH` is set once.
+
+| System | Command |
+|--------|---------|
+| macOS, Linux, WSL with Homebrew | `brew install groupbees/tap/pollen` · `brew upgrade groupbees/tap/pollen` |
+| Linux, WSL, macOS without Homebrew | [`scripts/install.sh`](scripts/install.sh) `[vX.Y.Z] [dir]` → `~/.local/bin` |
+| Windows (PowerShell) | [`scripts/install.ps1`](scripts/install.ps1) `[-Version vX.Y.Z] [-InstallDir dir]` |
+
+Both scripts take the latest release by default and check the archive against
+the release's `SHA256SUMS`; `install.sh` defers to brew when brew installed
+pollen. Run them from this skill's directory (e.g.
+`~/.claude/skills/pollen/scripts/install.sh`). Behind a corporate proxy, set
+`https_proxy` first. Private sources need an SSH key on the machine that the
+git host accepts; public ones work over HTTPS as is.
 
 ## Where the config lives
 
