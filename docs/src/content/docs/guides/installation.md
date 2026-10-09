@@ -42,6 +42,26 @@ line in `SHA256SUMS`:
 Get-FileHash -Algorithm SHA256 pollen-x86_64-pc-windows-msvc-v*.zip
 ```
 
+## Install or upgrade script
+
+The `pollen` skill ships two scripts that download a release, check it against
+`SHA256SUMS` and install the binary, the same command upgrading in place:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/groupbees/pollen/main/skills/pollen/scripts/install.sh
+bash install.sh                     # latest release → ~/.local/bin
+bash install.sh v0.4.0 /opt/bin     # a given release, elsewhere
+```
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/groupbees/pollen/main/skills/pollen/scripts/install.ps1 -OutFile install.ps1
+./install.ps1                       # latest release → %LOCALAPPDATA%\Programs\pollen, added to PATH
+```
+
+Once the skill is installed, an agent runs them from its own copy
+(`~/.claude/skills/pollen/scripts/`). With Homebrew, prefer `brew upgrade`:
+`install.sh` hands over to it when brew installed pollen.
+
 Or build it from source:
 
 ```sh
