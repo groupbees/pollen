@@ -74,6 +74,13 @@ repos:
       - path: skills
 ```
 
+To see what a source provides before adding it — each skill's path and
+description, and the commit to pin:
+
+```sh
+pollen show https://github.com/groupbees/skills-opensource
+```
+
 Every key is in the
 [configuration reference](https://groupbees.github.io/pollen/reference/configuration/),
 and every option's

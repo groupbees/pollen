@@ -252,7 +252,10 @@ mod tests {
 
         let found = discover(source.path(), &spec("skills", false, None)).unwrap();
 
-        assert_eq!(found, [source.path().join("skills/demo")]);
+        // Discovery works from the canonical root: on macOS the temporary
+        // directory sits behind the /var -> /private/var symlink.
+        let root = source.path().canonicalize().unwrap();
+        assert_eq!(found, [root.join("skills/demo")]);
     }
 
     #[cfg(unix)]
