@@ -38,5 +38,11 @@ async fn run(cli: &Cli) -> Result<()> {
         Command::Autoupdate { freeze, dry_run } => {
             command::autoupdate::run(cli, *freeze, *dry_run).await
         }
+        Command::Show {
+            repo,
+            revision,
+            path,
+            format,
+        } => command::show::run(cli, repo, revision.as_deref(), path.as_deref(), *format).await,
     }
 }

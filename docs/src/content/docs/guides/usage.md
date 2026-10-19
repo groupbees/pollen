@@ -1,6 +1,6 @@
 ---
 title: Usage
-description: Deploy, preview, validate and list skills with the pollen commands.
+description: Deploy, preview, validate, list and inspect skills with the pollen commands.
 sidebar:
   order: 2
 ---
@@ -64,6 +64,19 @@ pollen autoupdate
 release in a comment (`revision: <sha>  # v0.2.0`); run on an up-to-date tag,
 it only freezes it. Only stable `vX.Y.Z` or `X.Y.Z` tags count as releases,
 and a branch revision is left alone.
+
+See what a git source provides before adding it to the config — each skill's
+path, in the form `paths:` takes, its description, and the commit to pin:
+
+```sh
+pollen show https://github.com/groupbees/skills-opensource
+pollen show git@github.com:org/skills.git --revision v0.2.0 --path skills/docker
+pollen show https://github.com/groupbees/pollen --format json
+```
+
+It reads the newest release unless `--revision` names another (`HEAD` when the
+source has none), lists invalid skills with their error instead of stopping,
+and writes nothing.
 
 List what is currently deployed:
 

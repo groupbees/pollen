@@ -68,12 +68,13 @@ Each maps to a module under [src/](src/).
   `outdated` and `autoupdate` read the tags with `git ls-remote`, without
   fetching; `autoupdate` rewrites the `revision:` lines in place rather than
   re-serialising the YAML, so comments and layout survive.
-- **[command](src/command.rs)** — the subcommands. `validate` has two depths:
-  the config file alone, which touches no network and is what the published
-  pre-commit hook runs, and the full check that fetches every source and reads
-  every skill. `plan` is shared
-  between them: it is the pure "what should be deployed" half, and `update` is
-  the half that touches disk.
+- **[command](src/command.rs)** — the subcommands. `show` checks one source
+  out without any config and lists what it holds, invalid skills included.
+  `validate` has two depths: the config file alone, which touches no network
+  and is what the published pre-commit hook runs, and the full check that
+  fetches every source and reads every skill. `plan` is shared between them:
+  it is the pure "what should be deployed" half, and `update` is the half that
+  touches disk.
 
 ## Data flow
 

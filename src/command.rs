@@ -5,6 +5,7 @@ pub mod list;
 pub mod outdated;
 pub mod plan;
 pub mod schema;
+pub mod show;
 pub mod update;
 pub mod validate;
 

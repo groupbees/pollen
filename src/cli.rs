@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// What separates the directories of a list, as in `PATH`.
 ///
@@ -160,6 +160,37 @@ pub enum Command {
         #[arg(long, env = "POLLEN_DRY_RUN")]
         dry_run: bool,
     },
+
+    /// List the skills a git source provides, before adding it to a config.
+    ///
+    /// Reads the newest release unless `--revision` names another, and prints
+    /// each skill's path (the form `paths:` takes) and description, then the
+    /// commit to pin. Writes nothing.
+    Show {
+        /// A git URL or a path to a git repository, as in `repo:`.
+        repo: String,
+
+        /// The tag, branch or commit to read instead of the newest release.
+        #[arg(long)]
+        revision: Option<String>,
+
+        /// Only list the skills under this directory of the source.
+        #[arg(long)]
+        path: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+}
+
+/// How `show` prints its listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Format {
+    /// One aligned line per skill.
+    Text,
+    /// The full listing as JSON, for scripts and agents.
+    Json,
 }
 
 #[cfg(test)]

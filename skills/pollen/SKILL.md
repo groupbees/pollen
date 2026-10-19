@@ -1,6 +1,6 @@
 ---
 name: pollen
-description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml, adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning).
+description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml, seeing what skills a source provides before adding it (pollen show), adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning).
 ---
 
 # pollen
@@ -55,7 +55,9 @@ repos:
 ```
 
 Skills deploy flat under their folder name, so names must be unique across
-sources.
+sources. Before adding a source, `pollen show <repo>` lists its skills — the
+`path` to put under `paths:`, each description — and prints the
+`revision: <sha>  # vX.Y.Z` line to paste.
 
 ## Pin a commit, not a branch — and no lockfile
 
@@ -75,6 +77,7 @@ pollen list                         # what is deployed, from which commit
 pollen outdated                     # newer release per source
 pollen autoupdate [--freeze]        # bump every source (rewrites revision: lines only)
 pollen validate [--config-only] [--pinned]   # check config and skills; --pinned requires commits
+pollen show <repo> [--revision R] [--path P] [--format json]   # what a source provides; writes nothing
 ```
 
 `pollen validate --config-only --pinned` is offline: run it in CI or in the
