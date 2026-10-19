@@ -61,8 +61,8 @@ impl State {
     ///
     /// # Errors
     ///
-    /// When the file cannot be read, is corrupt, or was written by a newer
-    /// pollen.
+    /// When the file cannot be read, is corrupt, was written by a newer
+    /// pollen, or contains an invalid managed skill name.
     pub fn load(target: &Path) -> Result<Self> {
         let path = Self::path(target);
         if !path.is_file() {
@@ -83,6 +83,9 @@ impl State {
             path.display(),
             state.version
         );
+        state
+            .validate_skill_names()
+            .with_context(|| format!("{} contains unsafe managed skill names", path.display()))?;
         Ok(state)
     }
 
@@ -90,9 +93,12 @@ impl State {
     ///
     /// # Errors
     ///
-    /// When the target directory cannot be created or written to.
+    /// When a managed skill name is invalid or the target directory cannot
+    /// be created or written to.
     pub fn save(&self, target: &Path) -> Result<()> {
         let path = Self::path(target);
+        self.validate_skill_names()
+            .with_context(|| format!("{} contains unsafe managed skill names", path.display()))?;
         std::fs::create_dir_all(target)
             .with_context(|| format!("cannot create {}", target.display()))?;
         let text = serde_json::to_string_pretty(self)?;
@@ -113,6 +119,15 @@ impl State {
     #[must_use]
     pub fn path(target: &Path) -> PathBuf {
         target.join(STATE_FILE)
+    }
+
+    /// Refuse unsafe identities before they reach target writes or pruning.
+    fn validate_skill_names(&self) -> Result<()> {
+        for name in self.skills.keys() {
+            crate::skill::validate_name(name)
+                .map_err(|error| anyhow::anyhow!("unsafe managed skill name {name:?}: {error}"))?;
+        }
+        Ok(())
     }
 }
 
@@ -173,5 +188,50 @@ mod tests {
         std::fs::write(State::path(target.path()), "not json").unwrap();
 
         assert!(State::load(target.path()).is_err());
+    }
+
+    #[test]
+    fn refuses_unsafe_managed_skill_names_when_loading() {
+        let target = tempfile::tempdir().unwrap();
+        let unsafe_names = [
+            String::new(),
+            "../outside".to_owned(),
+            "..\\outside".to_owned(),
+            "/outside".to_owned(),
+            "C:\\outside".to_owned(),
+            "Uppercase".to_owned(),
+            "double--hyphen".to_owned(),
+            "x".repeat(65),
+        ];
+        for name in unsafe_names {
+            let mut skills = serde_json::Map::new();
+            skills.insert(name.clone(), serde_json::to_value(entry()).unwrap());
+            let original = serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "skills": skills,
+            }))
+            .unwrap();
+            std::fs::write(State::path(target.path()), &original).unwrap();
+
+            let result = State::load(target.path());
+
+            assert!(
+                result.is_err(),
+                "unsafe managed identity accepted: {name:?}"
+            );
+            assert_eq!(std::fs::read(State::path(target.path())).unwrap(), original);
+        }
+    }
+
+    #[test]
+    fn refuses_to_write_unsafe_managed_skill_names() {
+        let target = tempfile::tempdir().unwrap();
+        let mut state = State::default();
+        state.skills.insert("../outside".to_owned(), entry());
+
+        let result = state.save(target.path());
+
+        assert!(result.is_err());
+        assert!(!State::path(target.path()).exists());
     }
 }

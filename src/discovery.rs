@@ -16,7 +16,8 @@ use crate::source::{contained_join, relative_slug};
 /// When the entry's path is missing, is not a directory, escapes the source
 /// root, or cannot be walked.
 pub fn discover(root: &Path, spec: &PathSpec) -> Result<Vec<PathBuf>> {
-    let base = contained_join(root, &spec.path).with_context(|| {
+    let canonical_root = root.canonicalize()?;
+    let base = contained_join(&canonical_root, &spec.path).with_context(|| {
         format!(
             "`{}` does not exist in the source rooted at {}",
             spec.path.display(),
@@ -44,6 +45,10 @@ pub fn discover(root: &Path, spec: &PathSpec) -> Result<Vec<PathBuf>> {
             tracing::debug!(path = %candidate.display(), %relative, "excluded");
             continue;
         }
+        let relative_to_root = candidate
+            .strip_prefix(&canonical_root)
+            .with_context(|| format!("{} leaves the source root", candidate.display()))?;
+        contained_join(&canonical_root, relative_to_root)?;
         kept.push(candidate);
     }
     kept.sort();
@@ -210,5 +215,61 @@ mod tests {
             .to_string();
 
         assert!(error.contains("absent"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlinked_child_skill_outside_the_source_root() {
+        let source = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        skill_at(outside.path(), "demo");
+        std::fs::create_dir(source.path().join("skills")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("demo"),
+            source.path().join("skills/demo"),
+        )
+        .unwrap();
+        let sentinel = outside.path().join("demo/SKILL.md");
+        let original = std::fs::read(&sentinel).unwrap();
+
+        let result = discover(source.path(), &spec("skills", false, None));
+
+        assert!(result.is_err(), "an outside source must not become a skill");
+        assert_eq!(std::fs::read(&sentinel).unwrap(), original);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retains_a_symlinked_child_skill_inside_the_source_root() {
+        let source = tempfile::tempdir().unwrap();
+        skill_at(source.path(), "library/demo");
+        std::fs::create_dir(source.path().join("skills")).unwrap();
+        std::os::unix::fs::symlink(
+            source.path().join("library/demo"),
+            source.path().join("skills/demo"),
+        )
+        .unwrap();
+
+        let found = discover(source.path(), &spec("skills", false, None)).unwrap();
+
+        assert_eq!(found, [source.path().join("skills/demo")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn does_not_select_an_excluded_outside_symlinked_child() {
+        let source = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        skill_at(outside.path(), "demo");
+        std::fs::create_dir(source.path().join("skills")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("demo"),
+            source.path().join("skills/demo"),
+        )
+        .unwrap();
+
+        let found = discover(source.path(), &spec("skills", false, Some("^demo$"))).unwrap();
+
+        assert!(found.is_empty());
     }
 }

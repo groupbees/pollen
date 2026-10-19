@@ -37,6 +37,11 @@ a config can be shared without its sources moving. See
 [examples/pollen.yaml](https://github.com/groupbees/pollen/blob/main/examples/pollen.yaml)
 for a commented config.
 
+Every selected skill directory must remain inside its source root after symlink
+resolution. A child directory symlink resolving outside the root refuses the run.
+Links within the root retain their selected name and path. Excluded candidates
+are not selected and do not enter this check.
+
 Set `targets` yourself to deploy elsewhere — a single directory, or the
 user-level pair, which is also what `--global` uses when the user-level config
 sets none:

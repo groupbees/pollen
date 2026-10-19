@@ -193,7 +193,10 @@ digest. A second file would only repeat the config, and could disagree with it.
   `--force` hands the directory over. A recorded config that is gone (the
   project moved) is not an owner any more and is replaced silently.
 - A `paths:` entry never resolves outside its source root, before or after
-  symlink resolution.
+  symlink resolution. Each selected skill directory has the same containment
+  check, including child directory symlinks. Excluded candidates are not selected.
+- Managed state keys follow the same name rules as authored skills. Unsafe
+  keys refuse the target before installing, pruning or sweeping staging material.
 - An install becomes visible in one rename. There is no window in which the
   target holds a partially written skill.
 - A revision resolves to a commit or the run fails. `FETCH_HEAD` is only

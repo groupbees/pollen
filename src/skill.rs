@@ -154,13 +154,17 @@ fn split_frontmatter(text: &str) -> Option<&str> {
     None
 }
 
-fn validate_name(name: &str) -> Result<(), ValidationError> {
+/// Validate an authored or persisted skill identifier before using it as a path.
+pub(crate) fn validate_name(name: &str) -> Result<(), ValidationError> {
     let error = |message: &'static str| {
         let mut failure = ValidationError::new("skill_name");
         failure.message = Some(message.into());
         failure
     };
 
+    if name.is_empty() || name.len() > 64 {
+        return Err(error("must contain between 1 and 64 characters"));
+    }
     if !name.chars().all(|character| {
         character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
     }) {
