@@ -1,7 +1,16 @@
 # pollen
 
 <p align="center">
-  <img src="assets/logo.svg" alt="pollen logo" width="480">
+  <img src="assets/logo.svg" alt="pollen logo" width="260">
+</p>
+
+<p align="center">
+  <a href="https://github.com/groupbees/pollen/releases/latest"><img src="https://img.shields.io/github/v/release/groupbees/pollen?sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/groupbees/pollen/actions/workflows/quality.yaml"><img src="https://img.shields.io/github/actions/workflow/status/groupbees/pollen/quality.yaml?branch=main&label=quality" alt="Quality"></a>
+  <a href="https://groupbees.github.io/pollen/"><img src="https://img.shields.io/badge/docs-groupbees.github.io%2Fpollen-3B3FD8" alt="Documentation"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/groupbees/pollen" alt="License"></a>
+  <a href="https://agentskills.io"><img src="https://img.shields.io/badge/Agent%20Skills-compatible-8E4BF7" alt="Agent Skills"></a>
+  <a href="https://github.com/groupbees/pollen/stargazers"><img src="https://img.shields.io/github/stars/groupbees/pollen?style=social" alt="GitHub stars"></a>
 </p>
 
 Deploy [Agent Skills](https://agentskills.io) from git repositories and local
@@ -19,7 +28,7 @@ paths to pull from.
 Out of the box it deploys to **both** `.claude/skills/`, which Claude Code
 reads, and `.agents/skills/`, the cross-client convention every other Agent
 Skills client scans — so one `pollen update` serves Claude Code, Cursor,
-Codex, Gemini CLI, Copilot, OpenCode and the rest without configuring
+Codex, Antigravity CLI, Copilot, OpenCode and the rest without configuring
 anything. A skill folder that also carries a `.claude-plugin/plugin.json` is
 copied whole, so plugin-shaped skills keep working too.
 
