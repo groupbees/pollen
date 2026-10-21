@@ -13,7 +13,7 @@ paths to pull from.
 Out of the box it deploys to **both** `.claude/skills/`, which Claude Code
 reads, and `.agents/skills/`, the cross-client convention every other Agent
 Skills client scans — so one `pollen update` serves Claude Code, Cursor,
-Codex, Gemini CLI, Copilot, OpenCode and the rest without configuring
+Codex, Antigravity CLI, Copilot, OpenCode and the rest without configuring
 anything. A skill folder that also carries a `.claude-plugin/plugin.json` is
 copied whole, so plugin-shaped skills keep working too.
 
