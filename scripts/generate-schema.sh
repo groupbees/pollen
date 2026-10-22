@@ -11,7 +11,7 @@ destination="schema/pollen.schema.json"
 staging="$(mktemp)"
 trap 'rm -f "$staging"' EXIT
 
-cargo run --quiet -- schema >"$staging"
+cargo run --quiet --package pollen -- schema >"$staging"
 mkdir -p "$(dirname "$destination")"
 mv "$staging" "$destination"
 trap - EXIT

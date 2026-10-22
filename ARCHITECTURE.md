@@ -26,9 +26,9 @@ flowchart LR
 
 ## Components
 
-Each maps to a module under [src/](src/).
+Each maps to a module under [pollen/src/](pollen/src/).
 
-- **[config](src/config.rs)** — owns the schema of `pollen.yaml` and every
+- **[config](pollen/src/config.rs)** — owns the schema of `pollen.yaml` and every
   rule about it: a git source is pinned to a revision, `local` is not, a
   `path` never climbs out of its source, an `exclude` compiles as a regular
   expression. It resolves the target directories from the CLI overrides, the
@@ -36,39 +36,39 @@ Each maps to a module under [src/](src/).
   directory with `--global`, which also reads the user-level config),
   dropping duplicates. It knows nothing about
   git or the filesystem beyond reading its own file.
-- **[source](src/source.rs)** — turns one `repos:` entry into a directory on
+- **[source](pollen/src/source.rs)** — turns one `repos:` entry into a directory on
   disk, behind the `Materializer` trait. `local` resolves to the config
   file's own directory; a git source goes through
-  [source/git](src/source/git.rs), which keeps one checkout per `(url,
+  [source/git](pollen/src/source/git.rs), which keeps one checkout per `(url,
   revision)` pair under the cache and shells out to `git`. It resolves the
   revision to a commit and refuses to guess when it cannot.
-- **[discovery](src/discovery.rs)** — walks a materialized source and answers
+- **[discovery](pollen/src/discovery.rs)** — walks a materialized source and answers
   which directories a `paths:` entry selects. A directory holding a `SKILL.md`
   is a skill and is never descended into, so a skill that bundles reference
   material does not spawn phantom children.
-- **[schema](src/schema.rs)** — derives the JSON Schema for `pollen.yaml`
-  from the same types [config](src/config.rs) deserialises, so the published
+- **[schema](pollen/src/schema.rs)** — derives the JSON Schema for `pollen.yaml`
+  from the same types [config](pollen/src/config.rs) deserialises, so the published
   schema cannot describe a file the parser would reject. It states the shape;
   the cross-field and semantic rules stay in `config`, which is why a config
   that satisfies the schema can still fail validation.
-- **[skill](src/skill.rs)** — reads and validates a `SKILL.md`'s YAML
+- **[skill](pollen/src/skill.rs)** — reads and validates a `SKILL.md`'s YAML
   frontmatter against the Agent Skills specification. Unknown keys are kept
   out of the model deliberately: agents extend the frontmatter with their own
   fields, and rejecting those would refuse perfectly good skills.
-- **[deploy](src/deploy.rs)** — copies a skill tree and fingerprints it. Every
+- **[deploy](pollen/src/deploy.rs)** — copies a skill tree and fingerprints it. Every
   install is staged in a sibling directory and moved in with a rename, and a
   replacement moves the previous version aside first so a failed rename can be
   undone.
-- **[state](src/state.rs)** — the record of what `pollen` installed in one
+- **[state](pollen/src/state.rs)** — the record of what `pollen` installed in one
   target directory, and the only thing that authorises it to replace or remove
   something. Each target carries its own, so targets never reason about each
   other.
-- **[version](src/version.rs)** — which of a remote's tags are releases
+- **[version](pollen/src/version.rs)** — which of a remote's tags are releases
   (stable `vX.Y.Z`), which is newest, and which one a revision stands for.
   `outdated` and `autoupdate` read the tags with `git ls-remote`, without
   fetching; `autoupdate` rewrites the `revision:` lines in place rather than
   re-serialising the YAML, so comments and layout survive.
-- **[command](src/command.rs)** — the subcommands. `show` checks one source
+- **[command](pollen/src/command.rs)** — the subcommands. `show` checks one source
   out without any config and lists what it holds, invalid skills included.
   `validate` has two depths: the config file alone, which touches no network
   and is what the published pre-commit hook runs, and the full check that

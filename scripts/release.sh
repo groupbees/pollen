@@ -66,7 +66,7 @@ command -v cargo >/dev/null || die "cargo is not on PATH"
 cargo set-version --help >/dev/null 2>&1 ||
   die "cargo-set-version is missing; install it with \`cargo install cargo-edit\`"
 
-current="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+current="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
 tag="v${version}"
 branch="$(git rev-parse --abbrev-ref HEAD)"
 
@@ -92,7 +92,7 @@ EOF
   exit 0
 fi
 
-cargo set-version "$version"
+cargo set-version --workspace "$version"
 cargo check --quiet --locked >/dev/null
 
 git add Cargo.toml Cargo.lock

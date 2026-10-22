@@ -80,13 +80,14 @@ cargo test --lib config::tests::rejects_a_git_repo_without_a_revision
 
 There are two layers, both run by the command above:
 
-- **Unit tests**, inside each module in [src/](src/). The ones in
-  [src/command/update.rs](src/command/update.rs) drive the orchestration
-  through a `mockall` double of the `Materializer` trait, so they never touch
-  a network.
-- **An end-to-end test**, [tests/end_to_end.rs](tests/end_to_end.rs), which
-  builds a real git repository in a temporary directory, tags it, and runs the
-  real fetch-discover-install path against it.
+- **Unit tests**, inside each module in [pollen/src/](pollen/src/). The ones
+  in [pollen/src/command/update.rs](pollen/src/command/update.rs) drive the
+  orchestration through a `mockall` double of the `Materializer` trait, so
+  they never touch a network.
+- **An end-to-end test**,
+  [pollen/tests/end_to_end.rs](pollen/tests/end_to_end.rs), which builds a
+  real git repository in a temporary directory, tags it, and runs the real
+  fetch-discover-install path against it.
 
 Everything runs offline and needs no fixtures or services — but `git` must be
 on `PATH`, since the tests that create a repository call it. They configure
@@ -190,7 +191,7 @@ the `github-pages` environment.
 ## The generated JSON Schema
 
 [schema/pollen.schema.json](schema/pollen.schema.json) is generated from
-the types in [src/config.rs](src/config.rs) and committed, because editors and
+the types in [pollen/src/config.rs](pollen/src/config.rs) and committed, because editors and
 external validators point at the file rather than at the binary. Changing the
 config types means regenerating it in the same commit:
 

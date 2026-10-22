@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn the_skill_pollen_ships_satisfies_the_specification() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("skills/pollen");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../skills/pollen");
 
         assert_eq!(load(&dir).unwrap().name, "pollen");
     }
