@@ -216,17 +216,48 @@ mod tests {
 
     use std::process::Command;
 
-    fn git(root: &Path, args: &[&str]) {
-        let status = Command::new("git")
+    fn git_command(root: &Path, args: &[&str]) -> Command {
+        let mut command = Command::new("git");
+        command
+            .args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"])
             .args(args)
             .current_dir(root)
             .env("GIT_AUTHOR_NAME", "test")
             .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
             .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
-            .status()
-            .unwrap();
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid");
+        command
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let status = git_command(root, args).status().unwrap();
         assert!(status.success(), "git {args:?} failed");
+    }
+
+    #[test]
+    fn fixtures_commit_and_tag_under_a_global_signing_setup() {
+        let home = tempfile::tempdir().unwrap();
+        let config = home.path().join("gitconfig");
+        std::fs::write(
+            &config,
+            "[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n",
+        )
+        .unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "--quiet", "-b", "main"]);
+        write(repo.path(), "README", "x");
+        git(repo.path(), &["add", "-A"]);
+
+        for args in [
+            &["commit", "--quiet", "-m", "signed?"][..],
+            &["tag", "v1.0.0"],
+        ] {
+            let status = git_command(repo.path(), args)
+                .env("GIT_CONFIG_GLOBAL", &config)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?} tried to sign");
+        }
     }
 
     fn write(root: &Path, relative: &str, text: &str) {
