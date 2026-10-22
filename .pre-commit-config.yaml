@@ -61,7 +61,7 @@ repos:
 
       - id: pollen-validate
         name: validate the example pollen config
-        entry: cargo run --quiet -- validate --config-only
+        entry: cargo run --quiet --package pollen -- validate --config-only
         language: system
         files: ^examples/pollen\.yaml$
 
@@ -70,7 +70,7 @@ repos:
         entry: scripts/generate-schema.sh
         language: system
         pass_filenames: false
-        files: ^(src/config\.rs|src/schema\.rs|schema/pollen\.schema\.json)$
+        files: ^(pollen/src/config\.rs|pollen/src/schema\.rs|schema/pollen\.schema\.json)$
 
       - id: shellcheck
         name: shellcheck

@@ -54,7 +54,9 @@ mod tests {
 
     #[test]
     fn the_committed_copy_is_up_to_date() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(SCHEMA_PATH);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(SCHEMA_PATH);
         let committed = std::fs::read_to_string(&path).expect("the schema is committed");
 
         assert_eq!(
@@ -66,7 +68,7 @@ mod tests {
 
     #[test]
     fn accepts_the_documented_example() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/pollen.yaml");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/pollen.yaml");
         let example = yaml(&std::fs::read_to_string(path).unwrap());
 
         let errors: Vec<String> = validator()
