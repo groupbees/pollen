@@ -9,16 +9,47 @@ use clap::{Parser, Subcommand, ValueEnum};
 /// A `:` on Windows would split `C:\skills` into `C` and `\skills`.
 const PATH_LIST_SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
 
+/// The config file read when none is named.
+pub const DEFAULT_CONFIG: &str = "pollen.yaml";
+
 /// Deploy Agent Skills declared in `pollen.yaml`.
 #[derive(Debug, Parser)]
 #[command(name = "pollen", version, about, long_about = None)]
 pub struct Cli {
+    /// The options every subcommand shares.
+    #[command(flatten)]
+    pub options: Options,
+
+    /// `tracing` filter directive (e.g. `info`, `pollen=debug`).
+    ///
+    /// Warnings and errors only by default: the summary on stdout already
+    /// lists every skill, so `info` adds a second line per skill. Pass `info`
+    /// to follow an update as it runs.
+    ///
+    /// Syntax: <https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives>
+    #[arg(
+        long = "log-filter",
+        env = "POLLEN_LOG_FILTER",
+        default_value = "warn",
+        global = true
+    )]
+    pub log_filter: String,
+
+    /// What to do.
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+/// Where the config, the targets and the git cache are, and whether to go
+/// online: what every subcommand reads, from the CLI or from a library caller.
+#[derive(Debug, Clone, clap::Args)]
+pub struct Options {
     /// Path to the configuration file.
     #[arg(
         long,
         short = 'c',
         env = "POLLEN_CONFIG_FILE",
-        default_value = "pollen.yaml",
+        default_value = DEFAULT_CONFIG,
         global = true
     )]
     pub config: PathBuf,
@@ -56,28 +87,21 @@ pub struct Cli {
     /// Work from the cache only, without contacting any git remote.
     #[arg(long, env = "POLLEN_OFFLINE", global = true)]
     pub offline: bool,
-
-    /// `tracing` filter directive (e.g. `info`, `pollen=debug`).
-    ///
-    /// Warnings and errors only by default: the summary on stdout already
-    /// lists every skill, so `info` adds a second line per skill. Pass `info`
-    /// to follow an update as it runs.
-    ///
-    /// Syntax: <https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives>
-    #[arg(
-        long = "log-filter",
-        env = "POLLEN_LOG_FILTER",
-        default_value = "warn",
-        global = true
-    )]
-    pub log_filter: String,
-
-    /// What to do.
-    #[command(subcommand)]
-    pub command: Command,
 }
 
-impl Cli {
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            config: PathBuf::from(DEFAULT_CONFIG),
+            global: false,
+            targets: Vec::new(),
+            cache_dir: None,
+            offline: false,
+        }
+    }
+}
+
+impl Options {
     /// The config file to read: the user-level one with `--global`, else
     /// `--config`.
     #[must_use]
@@ -97,6 +121,14 @@ impl Cli {
         } else {
             &crate::config::DEFAULT_TARGETS
         }
+    }
+
+    /// The git cache: `--cache-dir` with `~` expanded, else the default one.
+    #[must_use]
+    pub fn cache_dir(&self) -> PathBuf {
+        self.cache_dir
+            .as_deref()
+            .map_or_else(crate::source::default_cache_dir, crate::config::expand_home)
     }
 }
 
@@ -198,7 +230,9 @@ mod tests {
     use super::*;
 
     fn targets(value: &str) -> Vec<PathBuf> {
-        Cli::parse_from(["pollen", "--target", value, "list"]).targets
+        Cli::parse_from(["pollen", "--target", value, "list"])
+            .options
+            .targets
     }
 
     #[test]
@@ -216,10 +250,27 @@ mod tests {
 
     #[test]
     fn global_reads_the_user_level_config_and_targets() {
-        let cli = Cli::parse_from(["pollen", "--global", "update"]);
+        let options = Cli::parse_from(["pollen", "--global", "update"]).options;
 
-        assert_eq!(cli.config_path(), crate::config::global_config_path());
-        assert_eq!(cli.default_targets(), crate::config::GLOBAL_DEFAULT_TARGETS);
+        assert_eq!(options.config_path(), crate::config::global_config_path());
+        assert_eq!(
+            options.default_targets(),
+            crate::config::GLOBAL_DEFAULT_TARGETS
+        );
+    }
+
+    #[test]
+    fn the_library_defaults_match_the_command_line_ones() {
+        let command = <Cli as clap::CommandFactory>::command();
+        let config = command
+            .get_arguments()
+            .find(|argument| argument.get_id() == "config")
+            .unwrap();
+
+        assert_eq!(
+            config.get_default_values(),
+            [Options::default().config.as_os_str()]
+        );
     }
 
     #[test]

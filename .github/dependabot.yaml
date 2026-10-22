@@ -25,6 +25,21 @@ updates:
           - patch
           - minor
 
+  - package-ecosystem: uv
+    directory: /pollen-py
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+    groups:
+      patch-and-minor:
+        update-types:
+          - patch
+          - minor
+
   - package-ecosystem: npm
     directory: /docs
     schedule:

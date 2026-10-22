@@ -1,0 +1,63 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "pollen-skills"
+description = "Deploy Agent Skills from git repositories and local directories, declaratively"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+# A copy: PEP 639 does not let a package reach ../LICENSE.
+license-files = ["LICENSE"]
+authors = [{ name = "Guillaume Leroy", email = "guillaume.le-roy@external.thalesgroup.com" }]
+keywords = ["agent-skills", "claude-code", "git"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Topic :: Software Development",
+]
+dynamic = ["version"]
+
+[project.urls]
+Documentation = "https://groupbees.github.io/pollen/"
+Repository = "https://github.com/groupbees/pollen"
+
+[tool.maturin]
+python-source = "python"
+module-name = "pollen._pollen"
+
+[tool.uv]
+# uv rebuilds the extension only when one of these changes.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "Cargo.toml" },
+  { file = "src/**/*.rs" },
+  { file = "../Cargo.lock" },
+  { file = "../pollen/Cargo.toml" },
+  { file = "../pollen/src/**/*.rs" },
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF", "PT"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pollen"]
+
+[tool.pyright]
+include = ["python", "tests"]
+extraPaths = ["python", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]

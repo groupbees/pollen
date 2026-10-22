@@ -65,8 +65,16 @@ your `PATH`, or build it from source with Rust ≥ 1.97.1:
 cargo install --git https://github.com/groupbees/pollen
 ```
 
+To drive pollen from Python instead, with typed results rather than printed
+ones, install the `pollen-skills` package (Python ≥ 3.11):
+
+```sh
+pip install pollen-skills
+```
+
 See [Installation](https://groupbees.github.io/pollen/guides/installation/)
-for the platforms and the checksums.
+for the platforms and the checksums, and
+[Python](https://groupbees.github.io/pollen/guides/python/) for the API.
 
 ### Configuration
 

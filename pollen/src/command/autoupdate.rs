@@ -1,12 +1,12 @@
 //! `pollen autoupdate`: move every git source to its newest release, in place.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use anyhow::{Context as _, Result, bail};
 use regex::Regex;
 
-use crate::cli::Cli;
+use crate::cli::Options;
 use crate::command::Context;
 use crate::command::outdated::{self, Status};
 use crate::config::{Config, is_commit_id};
@@ -26,37 +26,68 @@ pub struct Bump {
     pub release: Option<String>,
 }
 
+/// What an autoupdate changed, or would change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outcome {
+    /// The config file.
+    pub path: PathBuf,
+    /// One entry per source moved, empty when every source is up to date.
+    pub bumps: Vec<Bump>,
+    /// Whether the file was rewritten: false on a dry run or with no bump.
+    pub written: bool,
+}
+
 /// Run the subcommand.
 ///
 /// # Errors
 ///
 /// When the config cannot be loaded, a remote cannot be reached, or the
 /// rewritten file would not be a valid config.
-pub async fn run(cli: &Cli, freeze: bool, dry_run: bool) -> Result<()> {
-    if cli.offline {
-        bail!("`autoupdate` asks every remote for its tags; drop --offline");
-    }
-    let path = cli.config_path();
-    let context = Context::open(cli)?;
-    let bumps = plan(&outdated::check(&context.config).await?, freeze);
+pub async fn run(options: &Options, freeze: bool, dry_run: bool) -> Result<()> {
+    let outcome = apply(options, freeze, dry_run).await?;
+    let path = outcome.path.display();
 
-    if bumps.is_empty() {
-        println!("{}: every source is up to date", path.display());
+    if outcome.bumps.is_empty() {
+        println!("{path}: every source is up to date");
         return Ok(());
     }
-    for bump in &bumps {
+    for bump in &outcome.bumps {
         println!("{}  {} -> {}", bump.repo, bump.from, written(bump));
     }
-    if dry_run {
-        println!("{}: not written (dry run)", path.display());
-        return Ok(());
+    if outcome.written {
+        println!("{path}: {} source(s) updated", outcome.bumps.len());
+    } else {
+        println!("{path}: not written (dry run)");
     }
-
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("cannot read {}", path.display()))?;
-    write_checked(&path, &rewrite(&text, &bumps)?)?;
-    println!("{}: {} source(s) updated", path.display(), bumps.len());
     Ok(())
+}
+
+/// Move every git source of the config `options` name to its newest release,
+/// rewriting the file unless `dry_run`.
+///
+/// # Errors
+///
+/// When `options` ask to stay offline, the config cannot be loaded, a remote
+/// cannot be reached, or the rewritten file would not be a valid config.
+pub async fn apply(options: &Options, freeze: bool, dry_run: bool) -> Result<Outcome> {
+    if options.offline {
+        bail!("`autoupdate` asks every remote for its tags; drop --offline");
+    }
+    let path = options.config_path();
+    let context = Context::open(options)?;
+    let bumps = plan(&outdated::check(&context.config).await?, freeze);
+
+    let written = !bumps.is_empty() && !dry_run;
+    if written {
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("cannot read {}", path.display()))?;
+        write_checked(&path, &rewrite(&text, &bumps)?)?;
+    }
+    Ok(Outcome {
+        path,
+        bumps,
+        written,
+    })
 }
 
 /// What to change: every source behind its newest release, and with `freeze`

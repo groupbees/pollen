@@ -5,7 +5,7 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 
-use crate::cli::Cli;
+use crate::cli::Options;
 use crate::command::Context;
 use crate::config::{Config, Source, is_commit_id};
 use crate::source::git;
@@ -76,15 +76,25 @@ fn short(revision: &str) -> String {
 /// # Errors
 ///
 /// When the config cannot be loaded or a remote cannot be reached.
-pub async fn run(cli: &Cli) -> Result<()> {
-    if cli.offline {
-        bail!("`outdated` asks every remote for its tags; drop --offline");
-    }
-    let context = Context::open(cli)?;
-    for status in check(&context.config).await? {
+pub async fn run(options: &Options) -> Result<()> {
+    for status in statuses(options).await? {
         println!("{status}");
     }
     Ok(())
+}
+
+/// Load the config `options` name and check each git source against its
+/// remote's releases.
+///
+/// # Errors
+///
+/// When `options` ask to stay offline, the config cannot be loaded, or a
+/// remote cannot be reached.
+pub async fn statuses(options: &Options) -> Result<Vec<Status>> {
+    if options.offline {
+        bail!("`outdated` asks every remote for its tags; drop --offline");
+    }
+    check(&Context::open(options)?.config).await
 }
 
 /// Ask each git source's remote for its releases.

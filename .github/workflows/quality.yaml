@@ -39,6 +39,10 @@ jobs:
       - name: install the documentation site's dependencies
         run: npm ci --prefix docs
 
+      # The pyright hook runs through uv.
+      - name: set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+
       - name: install pre-commit
         run: pipx install pre-commit
 
@@ -69,6 +73,41 @@ jobs:
 
       - name: run the test suite
         run: cargo test --all-targets --locked
+
+  python:
+    name: python (${{ matrix.runner }}, ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - windows-2025
+        # The oldest Python the abi3 wheel supports, and the newest.
+        python:
+          - "3.11"
+          - "3.14"
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: pollen-py
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    steps:
+      - name: check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: cache the cargo build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+
+      - name: install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: set up uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+
+      - name: build the bindings and run their tests
+        run: uv run --locked pytest
 
   homebrew-formula:
     name: homebrew formula

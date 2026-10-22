@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install the pollen binary with Homebrew, from a release archive or from source.
+description: Install the pollen binary with Homebrew, from a release archive or from source, or the Python package from PyPI.
 sidebar:
   order: 1
 ---
@@ -67,3 +67,15 @@ Or build it from source:
 ```sh
 cargo install --git https://github.com/groupbees/pollen
 ```
+
+## Python package
+
+To call pollen from Python rather than from a shell, install the
+`pollen-skills` package; it carries its own copy of the engine, so the binary
+is not needed:
+
+```sh
+pip install pollen-skills
+```
+
+See [Python](/guides/python/) for the API.

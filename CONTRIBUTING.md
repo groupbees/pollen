@@ -2,7 +2,8 @@
 
 Issues and pull requests go to
 <https://github.com/groupbees/pollen>. The short version: install the
-toolchain, run `pre-commit install`, keep `cargo test` green.
+toolchain, run `pre-commit install`, keep `cargo test` and the Python tests
+green.
 
 ## Development setup
 
@@ -14,6 +15,14 @@ Install `rustup` (works the same on macOS and Linux):
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), which
+builds the Python bindings, runs their tests and the `pyright` hook (works the
+same on macOS and Linux):
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 Install `pre-commit`:
@@ -60,7 +69,11 @@ npm ci --prefix docs
 cargo test
 ```
 
-A green `cargo test` means the setup is good. See the
+```sh
+uv run --directory pollen-py pytest
+```
+
+A green `cargo test` and a green `pytest` mean the setup is good. See the
 [documentation](https://groupbees.github.io/pollen/) for running the tool
 itself.
 
@@ -78,7 +91,12 @@ A single test, while iterating:
 cargo test --lib config::tests::rejects_a_git_repo_without_a_revision
 ```
 
-There are two layers, both run by the command above:
+The workspace holds two crates: [pollen/](pollen/), the library and the CLI,
+and [pollen-py/](pollen-py/), the Python bindings. `cargo test` and
+`cargo build` cover `pollen` alone (`default-members`): the bindings build
+through maturin, as a Python extension.
+
+There are two layers in `pollen`, both run by the command above:
 
 - **Unit tests**, inside each module in [pollen/src/](pollen/src/). The ones
   in [pollen/src/command/update.rs](pollen/src/command/update.rs) drive the
@@ -96,6 +114,22 @@ repository, so a global signing setup does not break them.
 
 The suite runs on Linux and Windows in CI. A test whose behaviour depends on
 the platform is gated with `#[cfg(unix)]` or `#[cfg(windows)]`.
+
+The Python bindings are tested from Python, with pytest, in
+[pollen-py/tests/](pollen-py/tests/). `uv run` builds the extension with
+maturin first, and rebuilds it whenever a Rust source in either crate changes:
+
+```sh
+uv run --directory pollen-py pytest
+```
+
+```sh
+uv run --directory pollen-py pytest -k show
+```
+
+They build git repositories in temporary directories, like the end-to-end
+test, and need nothing else. CI runs them on Linux and Windows, with the oldest
+and the newest supported Python.
 
 The documentation site has its own unit tests, for the version planning,
 the version picker and the link rewriting:
@@ -142,7 +176,11 @@ pre-commit run cargo-clippy --all-files
 | `yamllint` | YAML style, per [.yamllint.yaml](.yamllint.yaml) — block style only, no leading `---` | Rewrite the YAML |
 | `actionlint` | Workflow syntax and expressions | Fix the workflow |
 | `cargo-fmt` | Formatting | `cargo fmt` |
-| `cargo-clippy` | `clippy` with `pedantic`, warnings denied | Fix the finding, or add a scoped `#[allow]` with a justification |
+| `cargo-clippy` | `clippy` with `pedantic` on both crates, warnings denied | Fix the finding, or add a scoped `#[allow]` with a justification |
+| `ruff-check`, `ruff-format` | Lint and formatting of the Python bindings, per [pollen-py/pyproject.toml](pollen-py/pyproject.toml) | Re-run; most findings fix themselves |
+| `uv-lock` | [pollen-py/uv.lock](pollen-py/uv.lock) matches `pyproject.toml` | Re-run; the hook rewrites the lockfile |
+| `pyright` | Types of the Python package, its stubs and its tests | Fix the type, or the stub in [pollen-py/python/pollen/_pollen.pyi](pollen-py/python/pollen/_pollen.pyi) |
+| `license-copy` | [pollen-py/LICENSE](pollen-py/LICENSE), which the Python package ships, is identical to [LICENSE](LICENSE) | `cp LICENSE pollen-py/LICENSE` |
 | `pollen-validate` | [examples/pollen.yaml](examples/pollen.yaml) still satisfies the config rules | Fix the example, or the rule that broke it |
 | `pollen-schema` | [schema/pollen.schema.json](schema/pollen.schema.json) matches the config types | Re-run; the hook rewrites the file |
 | `shellcheck` | The scripts in [scripts/](scripts/) | Fix the script |
@@ -167,10 +205,10 @@ commit gate stays fast.
 
 | Workflow | Triggers on | What it does | Reproduce locally |
 | --- | --- | --- | --- |
-| [quality.yaml](.github/workflows/quality.yaml) | every push to `main`, every pull request | `pre-commit run --all-files` on Linux, `cargo test --all-targets --locked` on both Linux (`ubuntu-24.04`) and Windows (`windows-2025`), the documentation site's tests, and the Homebrew formula check on macOS | `pre-commit run --all-files`, `cargo test --all-targets --locked`, `npm --prefix docs test` and `tests/homebrew-formula.sh`; for Windows, `cargo clippy --all-targets --target x86_64-pc-windows-msvc -- -D warnings` type-checks the Windows code paths from any host |
+| [quality.yaml](.github/workflows/quality.yaml) | every push to `main`, every pull request | `pre-commit run --all-files` on Linux, `cargo test --all-targets --locked` on both Linux (`ubuntu-24.04`) and Windows (`windows-2025`), the Python bindings' tests on both with Python 3.11 and 3.14, the documentation site's tests, and the Homebrew formula check on macOS | `pre-commit run --all-files`, `cargo test --all-targets --locked`, `uv run --directory pollen-py pytest`, `npm --prefix docs test` and `tests/homebrew-formula.sh`; for Windows, `cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings` type-checks the Windows code paths from any host |
 | [docs.yaml](.github/workflows/docs.yaml) | pushes to `main` and pull requests touching `docs/`, `assets/` or the workflow; manual | Builds every version of the documentation site, links validated; on `main`, deploys it to GitHub Pages | `git fetch --tags` then `npm --prefix docs run build:versions` |
 | [security.yaml](.github/workflows/security.yaml) | every push to `main`, every pull request, daily, manual | `trivy fs` over the repo, failing on fixable `HIGH`/`CRITICAL`, and a second non-blocking scan uploaded to code scanning | `trivy fs .` |
-| [release.yaml](.github/workflows/release.yaml) | tag `v*` | Checks the tag against `Cargo.toml`, builds the `.tar.gz` archives for Linux (musl, x86_64 and arm64) and macOS (arm64 and x86_64) and the `.zip` archives for Windows (MSVC, x86_64 and arm64, each on its native runner), creates the GitHub release with a `SHA256SUMS` over all of them and notes starting from the previous stable tag, installs and tests the Homebrew formula rendered from that `SHA256SUMS` and pushes it to [groupbees/homebrew-tap](https://github.com/groupbees/homebrew-tap), then runs `docs` on `main` so the site's root serves the new release. A pre-release tag (`v0.2.0-rc1`) builds the archives and keeps them as workflow artifacts, without a release page | — |
+| [release.yaml](.github/workflows/release.yaml) | tag `v*` | Checks the tag against `Cargo.toml`, builds the `.tar.gz` archives for Linux (musl, x86_64 and arm64) and macOS (arm64 and x86_64) and the `.zip` archives for Windows (MSVC, x86_64 and arm64, each on its native runner), creates the GitHub release with a `SHA256SUMS` over all of them and notes starting from the previous stable tag, installs and tests the Homebrew formula rendered from that `SHA256SUMS` and pushes it to [groupbees/homebrew-tap](https://github.com/groupbees/homebrew-tap), then runs `docs` on `main` so the site's root serves the new release. Alongside, builds the Python wheels (abi3, Python ≥ 3.11) for the same platforms plus musllinux, checks that each native one imports, builds the sdist, and publishes them to PyPI as `pollen-skills`. A pre-release tag (`v0.2.0-rc1`) builds the archives and keeps them as workflow artifacts, without a release page; its wheels still go to PyPI, as a pre-release pip installs only when asked | `uvx maturin build --release --manifest-path pollen-py/Cargo.toml` builds the wheel for the host |
 
 `quality` and `security` are the checks that block a merge; `docs` is
 path-filtered, so it is never a required check. `release` has no local
@@ -187,6 +225,11 @@ holds `security-events: write` for the SARIF upload and nothing else. The
 `docs` deploy job holds `pages: write` and `id-token: write`, and `release`'s
 `docs` job `actions: write` to start it. Pages deploys only from `main`, in
 the `github-pages` environment.
+
+`release`'s `pypi` job publishes through PyPI trusted publishing: it holds
+`id-token: write` and runs in the `pypi` environment, and the `pollen-skills`
+project on PyPI trusts this repository's `release.yaml` in that environment.
+No PyPI token is stored anywhere.
 
 ## The generated JSON Schema
 
@@ -252,8 +295,9 @@ npm --prefix docs run build:versions
 ## Cutting a release
 
 Releases go through [scripts/release.sh](scripts/release.sh) and nowhere else:
-it bumps `Cargo.toml` and `Cargo.lock` together, commits, tags, and asks
-before pushing. The `release` workflow re-derives the version from the tag and
+it bumps the workspace version in `Cargo.toml` and `Cargo.lock` together,
+commits, tags, and asks before pushing. The Python package takes its version
+from the same field, converted to PEP 440 (`0.6.0-rc1` becomes `0.6.0rc1`). The `release` workflow re-derives the version from the tag and
 refuses to publish when the two disagree, so a hand-made tag fails loudly
 instead of shipping a mislabelled binary.
 
@@ -272,6 +316,9 @@ instead of shipping a mislabelled binary.
   area — read `git log --oneline` and follow what is there.
 - Documentation moves with the code it describes, in the same pull request:
   the [documentation site](docs/src/content/docs/) for user-facing behaviour,
+  including the [Python guide](docs/src/content/docs/guides/python.md) and
+  the stubs in [pollen-py/python/pollen/](pollen-py/python/pollen/) when a
+  command's options or results change,
   [README.md](README.md) when installing or the first run changes, and
   [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the trade-offs behind
   it.

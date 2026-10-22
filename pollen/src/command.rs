@@ -11,9 +11,9 @@ pub mod validate;
 
 use std::path::PathBuf;
 
-use crate::cli::Cli;
-use crate::config::{Config, expand_home};
-use crate::source::{Fetcher, default_cache_dir};
+use crate::cli::Options;
+use crate::config::Config;
+use crate::source::Fetcher;
 
 /// Everything a subcommand needs, resolved from the CLI and the config file.
 pub struct Context {
@@ -29,8 +29,8 @@ impl Context {
     /// # Errors
     ///
     /// When the config file cannot be read, parsed or validated.
-    pub fn open(cli: &Cli) -> anyhow::Result<Self> {
-        Self::open_at(cli, &cli.config_path())
+    pub fn open(options: &Options) -> anyhow::Result<Self> {
+        Self::open_at(options, &options.config_path())
     }
 
     /// Load a named config file and resolve the target directories.
@@ -38,9 +38,9 @@ impl Context {
     /// # Errors
     ///
     /// When the config file cannot be read, parsed or validated.
-    pub fn open_at(cli: &Cli, config_path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn open_at(options: &Options, config_path: &std::path::Path) -> anyhow::Result<Self> {
         let config = Config::load(config_path)?;
-        let targets = config.targets(&cli.targets, cli.default_targets());
+        let targets = config.targets(&options.targets, options.default_targets());
         tracing::debug!(
             targets = ?targets,
             config = %config_path.display(),
@@ -51,11 +51,11 @@ impl Context {
 
     /// The materializer the config's sources are fetched through.
     #[must_use]
-    pub fn fetcher(&self, cli: &Cli) -> Fetcher {
-        let cache = cli
-            .cache_dir
-            .as_deref()
-            .map_or_else(default_cache_dir, expand_home);
-        Fetcher::new(self.config.base_dir.clone(), cache, cli.offline)
+    pub fn fetcher(&self, options: &Options) -> Fetcher {
+        Fetcher::new(
+            self.config.base_dir.clone(),
+            options.cache_dir(),
+            options.offline,
+        )
     }
 }

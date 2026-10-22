@@ -25,24 +25,25 @@ async fn main() -> Result<()> {
 }
 
 async fn run(cli: &Cli) -> Result<()> {
+    let options = &cli.options;
     match &cli.command {
-        Command::Update { dry_run, force } => command::update::run(cli, *dry_run, *force).await,
-        Command::List => command::list::run(cli),
+        Command::Update { dry_run, force } => command::update::run(options, *dry_run, *force).await,
+        Command::List => command::list::run(options),
         Command::Validate {
             configs,
             config_only,
             pinned,
-        } => command::validate::run(cli, configs, *config_only, *pinned).await,
+        } => command::validate::run(options, configs, *config_only, *pinned).await,
         Command::Schema => command::schema::run(),
-        Command::Outdated => command::outdated::run(cli).await,
+        Command::Outdated => command::outdated::run(options).await,
         Command::Autoupdate { freeze, dry_run } => {
-            command::autoupdate::run(cli, *freeze, *dry_run).await
+            command::autoupdate::run(options, *freeze, *dry_run).await
         }
         Command::Show {
             repo,
             revision,
             path,
             format,
-        } => command::show::run(cli, repo, revision.as_deref(), path.as_deref(), *format).await,
+        } => command::show::run(options, repo, revision.as_deref(), path.as_deref(), *format).await,
     }
 }

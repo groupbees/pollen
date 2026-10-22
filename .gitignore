@@ -1,3 +1,7 @@
 /target
 /.agents/skills/
 /.claude/skills/
+/pollen-py/.venv/
+/pollen-py/python/pollen/*.so
+/pollen-py/python/pollen/*.pyd
+__pycache__/

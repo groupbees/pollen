@@ -1,5 +1,8 @@
 [workspace]
-members = ["pollen"]
+members = ["pollen", "pollen-py"]
+# The bindings build through maturin, which links them as a Python extension;
+# plain `cargo build` and `cargo test` cover the CLI alone.
+default-members = ["pollen"]
 resolver = "3"
 
 [workspace.package]
