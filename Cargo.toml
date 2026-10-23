@@ -9,7 +9,7 @@ resolver = "3"
 version = "0.5.0"
 edition = "2024"
 rust-version = "1.90"
-authors = ["Guillaume Leroy <guillaume.le-roy@external.thalesgroup.com>"]
+authors = ["GroupBees <contact@groupbees.fr>"]
 repository = "https://github.com/groupbees/pollen"
 license = "Apache-2.0"
 

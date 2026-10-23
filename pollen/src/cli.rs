@@ -1,8 +1,13 @@
 //! The command line surface.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
+use tracing_subscriber::EnvFilter;
+
+use crate::{command, shutdown};
 
 /// What separates the directories of a list, as in `PATH`.
 ///
@@ -223,6 +228,83 @@ pub enum Format {
     Text,
     /// The full listing as JSON, for scripts and agents.
     Json,
+}
+
+/// Run the command line on `args`, program name first, and return the exit
+/// status.
+///
+/// The `pollen` binary and the Python package's `pollen` command both start
+/// here. A failure is printed to stderr as `Error: …`, as a `main` returning
+/// it would.
+pub fn main<I, T>(args: I) -> u8
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let cli = match Cli::try_parse_from(args) {
+        Ok(cli) => cli,
+        // `--help` and `--version` come through here too, with status 0.
+        Err(error) => {
+            let _ = error.print();
+            return u8::try_from(error.exit_code()).unwrap_or(2);
+        }
+    };
+    // Not `init`: it also bridges `log` into `tracing`, and fails in Python,
+    // where pyo3-log already owns `log`. A subscriber left by an earlier call
+    // in the same process is kept.
+    let _ = tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::new(&cli.log_filter))
+            .with_writer(std::io::stderr)
+            .finish(),
+    );
+
+    let result = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(anyhow::Error::from)
+        .and_then(|runtime| {
+            runtime.block_on(async {
+                tokio::select! {
+                    result = run(&cli) => result,
+                    () = shutdown::signal() => {
+                        tracing::warn!("interrupted; the target directory was left as it was found");
+                        bail!("interrupted")
+                    }
+                }
+            })
+        });
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("Error: {error:?}");
+            1
+        }
+    }
+}
+
+async fn run(cli: &Cli) -> Result<()> {
+    let options = &cli.options;
+    match &cli.command {
+        Command::Update { dry_run, force } => command::update::run(options, *dry_run, *force).await,
+        Command::List => command::list::run(options),
+        Command::Validate {
+            configs,
+            config_only,
+            pinned,
+        } => command::validate::run(options, configs, *config_only, *pinned).await,
+        Command::Schema => command::schema::run(),
+        Command::Outdated => command::outdated::run(options).await,
+        Command::Autoupdate { freeze, dry_run } => {
+            command::autoupdate::run(options, *freeze, *dry_run).await
+        }
+        Command::Show {
+            repo,
+            revision,
+            path,
+            format,
+        } => command::show::run(options, repo, revision.as_deref(), path.as_deref(), *format).await,
+    }
 }
 
 #[cfg(test)]

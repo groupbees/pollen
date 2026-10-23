@@ -19,7 +19,10 @@ runs the engine in-process. A second workspace member, `pollen-py`, binds the
 `pollen` library crate with PyO3 into an extension module. maturin builds it
 into one abi3 wheel per platform, for Python 3.11 and later. Each command is a
 function that returns frozen dataclasses instead of printing, and raises
-`pollen.PollenError` when the command fails. The release workflow publishes
+`pollen.PollenError` when the command fails. The extension also exposes the
+CLI itself, as the package's `pollen` script and as `python -m pollen`, so the
+package replaces the binary where only Python packages can be installed. The
+release workflow publishes
 the wheels and an sdist to PyPI from the same tag as the binaries.
 
 ```mermaid

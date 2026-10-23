@@ -28,6 +28,18 @@ Wheels are published for Linux (glibc and musl), macOS and Windows, on x86_64
 and arm64. On any other platform, pip builds the package from source, which
 needs Rust ≥ 1.97.1. The package imports as `pollen`.
 
+## Command line
+
+The package also installs the `pollen` command, the same CLI as the binary:
+
+```sh
+pollen update
+python -m pollen update   # through the interpreter, with no script on PATH
+```
+
+To get the command alone, outside any project, install it as a tool:
+`uv tool install pollen-skills` or `pipx install pollen-skills`.
+
 ## Deploying
 
 ```python

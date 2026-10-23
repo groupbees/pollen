@@ -74,3 +74,6 @@ def show(
 
 def schema() -> str:
     """The JSON Schema for `pollen.yaml`, as a JSON document."""
+
+def main() -> int:
+    """Run the `pollen` command line on `sys.argv` and return its exit status."""

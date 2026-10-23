@@ -192,7 +192,9 @@ jobs:
   # pip only installs when asked for it.
   pypi:
     name: pypi
+    # PyPI never takes a version back: upload only once the binaries built too.
     needs:
+      - binaries
       - wheels
       - sdist
     runs-on: ubuntu-24.04

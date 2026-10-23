@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 # A copy: PEP 639 does not let a package reach ../LICENSE.
 license-files = ["LICENSE"]
-authors = [{ name = "Guillaume Leroy", email = "guillaume.le-roy@external.thalesgroup.com" }]
+authors = [{ name = "GroupBees", email = "contact@groupbees.fr" }]
 keywords = ["agent-skills", "claude-code", "git"]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -18,6 +18,9 @@ classifiers = [
   "Topic :: Software Development",
 ]
 dynamic = ["version"]
+
+[project.scripts]
+pollen = "pollen._pollen:main"
 
 [project.urls]
 Documentation = "https://groupbees.github.io/pollen/"

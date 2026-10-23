@@ -19,6 +19,10 @@ The same command installs and upgrades; it replaces the binary in place, so
 | macOS, Linux, WSL with Homebrew | `brew install groupbees/tap/pollen` · `brew upgrade groupbees/tap/pollen` |
 | Linux, WSL, macOS without Homebrew | [`scripts/install.sh`](scripts/install.sh) `[vX.Y.Z] [dir]` → `~/.local/bin` |
 | Windows (PowerShell) | [`scripts/install.ps1`](scripts/install.ps1) `[-Version vX.Y.Z] [-InstallDir dir]` |
+| Any, with Python ≥ 3.11 | `uv tool install pollen-skills` · `uv tool upgrade pollen-skills` (or pipx) |
+
+Where a policy blocks unsigned executables (`pollen.exe` refused on a managed
+Windows machine), install the Python package and run `python -m pollen`.
 
 Both scripts take the latest release by default and check the archive against
 the release's `SHA256SUMS`; `install.sh` defers to brew when brew installed

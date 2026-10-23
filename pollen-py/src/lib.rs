@@ -1,6 +1,7 @@
 //! The `pollen._pollen` extension module: each function runs one pollen
 //! command and hands back the dataclasses `pollen._types` defines.
 
+use std::ffi::OsString;
 use std::future::Future;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -353,6 +354,23 @@ fn schema() -> PyResult<String> {
     pollen::schema::rendered().map_err(|error| PollenError::new_err(format!("{error:#}")))
 }
 
+/// Run the `pollen` command line on `sys.argv` and return its exit status:
+/// what the `pollen` script and `python -m pollen` call.
+#[pyfunction]
+fn main(py: Python<'_>) -> PyResult<u8> {
+    let sys_argv: Vec<OsString> = py.import("sys")?.getattr("argv")?.extract()?;
+    // `argv[0]` is the script's path, or `__main__.py` under `-m`: clap would
+    // show it in the usage line.
+    let args: Vec<OsString> = std::iter::once("pollen".into())
+        .chain(sys_argv.into_iter().skip(1))
+        .collect();
+    let status = py.detach(|| pollen::cli::main(args));
+    // Ctrl-C also tripped Python's handler; the CLI already reported it, so
+    // the pending `KeyboardInterrupt` is dropped rather than raised.
+    let _ = py.check_signals();
+    Ok(status)
+}
+
 /// The extension module behind the `pollen` package.
 #[pymodule]
 fn _pollen(module: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -369,5 +387,6 @@ fn _pollen(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(autoupdate, module)?)?;
     module.add_function(wrap_pyfunction!(show, module)?)?;
     module.add_function(wrap_pyfunction!(schema, module)?)?;
+    module.add_function(wrap_pyfunction!(main, module)?)?;
     Ok(())
 }

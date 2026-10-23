@@ -70,12 +70,15 @@ cargo install --git https://github.com/groupbees/pollen
 
 ## Python package
 
-To call pollen from Python rather than from a shell, install the
-`pollen-skills` package; it carries its own copy of the engine, so the binary
-is not needed:
+The `pollen-skills` package carries its own copy of the engine, so the binary
+is not needed. It installs the `pollen` command, and a Python API:
 
 ```sh
-pip install pollen-skills
+uv tool install pollen-skills   # or: pipx install pollen-skills
 ```
+
+`python -m pollen` runs the same command through the Python interpreter, for
+machines whose policy blocks executables that are not signed, such as a
+downloaded `pollen.exe`.
 
 See [Python](/guides/python/) for the API.
