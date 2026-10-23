@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use serde::Serialize;
 
-use crate::cli::{Cli, Format};
-use crate::config::{PathSpec, expand_home};
-use crate::source::{default_cache_dir, git, relative_slug};
+use crate::cli::{Format, Options};
+use crate::config::PathSpec;
+use crate::source::{git, relative_slug};
 use crate::version::{self, RemoteTag};
 use crate::{discovery, skill};
 
@@ -55,17 +55,13 @@ pub struct Entry {
 /// When the source cannot be fetched, the revision names nothing, or `path`
 /// is missing from the source.
 pub async fn run(
-    cli: &Cli,
+    options: &Options,
     repo: &str,
     revision: Option<&str>,
     path: Option<&Path>,
     format: Format,
 ) -> Result<()> {
-    let cache_dir = cli
-        .cache_dir
-        .as_deref()
-        .map_or_else(default_cache_dir, expand_home);
-    let listing = inspect(repo, revision, path, &cache_dir, cli.offline).await?;
+    let listing = inspect(repo, revision, path, &options.cache_dir(), options.offline).await?;
     match format {
         Format::Text => print!("{}", render(&listing)),
         Format::Json => println!("{}", serde_json::to_string_pretty(&listing)?),

@@ -33,6 +33,21 @@ repos:
     hooks:
       - id: actionlint
 
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.13.5
+    hooks:
+      - id: uv-lock
+        files: ^pollen-py/(pyproject\.toml|uv\.lock)$
+        args:
+          - --project
+          - pollen-py
+
   - repo: local
     hooks:
       - id: no-co-authors
@@ -53,11 +68,27 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: cargo clippy --all-targets -- -D warnings
+        entry: cargo clippy --workspace --all-targets -- -D warnings
         language: system
         pass_filenames: false
         types:
           - rust
+
+      - id: pyright
+        name: pyright the Python bindings
+        # The stubs and tests are checked against the sources, so the
+        # extension itself is not built.
+        entry: uv run --directory pollen-py --only-group dev pyright
+        language: system
+        pass_filenames: false
+        files: ^pollen-py/.*\.pyi?$
+
+      - id: license-copy
+        name: the Python package's LICENSE matches the repository's
+        entry: cmp LICENSE pollen-py/LICENSE
+        language: system
+        pass_filenames: false
+        files: ^(LICENSE|pollen-py/LICENSE)$
 
       - id: pollen-validate
         name: validate the example pollen config

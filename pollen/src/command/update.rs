@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 
-use crate::cli::Cli;
+use crate::cli::Options;
 use crate::command::Context;
 use crate::command::plan::{self, Planned};
 use crate::config::Config;
@@ -163,12 +163,20 @@ impl fmt::Display for Report {
 /// # Errors
 ///
 /// When the config cannot be loaded, or the update itself fails.
-pub async fn run(cli: &Cli, dry_run: bool, force: bool) -> Result<()> {
-    let context = Context::open(cli)?;
-    let fetcher = context.fetcher(cli);
-    let report = update(&context.config, &context.targets, &fetcher, dry_run, force).await?;
-    print!("{report}");
+pub async fn run(options: &Options, dry_run: bool, force: bool) -> Result<()> {
+    print!("{}", report(options, dry_run, force).await?);
     Ok(())
+}
+
+/// Load the config `options` name and update every target it resolves to.
+///
+/// # Errors
+///
+/// When the config cannot be loaded, or the update itself fails.
+pub async fn report(options: &Options, dry_run: bool, force: bool) -> Result<Report> {
+    let context = Context::open(options)?;
+    let fetcher = context.fetcher(options);
+    update(&context.config, &context.targets, &fetcher, dry_run, force).await
 }
 
 /// Bring every directory in `targets` in line with `config`.

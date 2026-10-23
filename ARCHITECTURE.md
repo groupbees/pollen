@@ -9,6 +9,8 @@ that set — installing, replacing and removing as needed. The sources are
 fetched and validated once and applied to every target, so deploying to two
 directories costs one fetch. Nothing runs in the background, and nothing is
 left behind between runs except a git cache and one state file per target.
+The same engine runs behind the `pollen` binary and behind the `pollen`
+Python package, which calls it in-process.
 
 ```mermaid
 flowchart LR
@@ -26,7 +28,9 @@ flowchart LR
 
 ## Components
 
-Each maps to a module under [pollen/src/](pollen/src/).
+The workspace holds two crates: [pollen/](pollen/), the library and the CLI,
+and [pollen-py/](pollen-py/), the Python bindings. Each component below maps
+to a module under [pollen/src/](pollen/src/), except the last.
 
 - **[config](pollen/src/config.rs)** — owns the schema of `pollen.yaml` and every
   rule about it: a git source is pinned to a revision, `local` is not, a
@@ -74,7 +78,20 @@ Each maps to a module under [pollen/src/](pollen/src/).
   and is what the published pre-commit hook runs, and the full check that
   fetches every source and reads every skill. `plan` is shared between them:
   it is the pure "what should be deployed" half, and `update` is the half that
-  touches disk.
+  touches disk. Each subcommand is a function that returns its result
+  (`update::report`, `list::installed`, `validate::check`,
+  `outdated::statuses`, `autoupdate::apply`, `show::inspect`) and a `run`
+  that prints it. Both take the global options as
+  [`cli::Options`](pollen/src/cli.rs), which a library caller builds without
+  clap.
+- **[pollen-py](pollen-py/)** — the `pollen._pollen` extension module, built
+  with PyO3 and maturin into the `pollen-skills` distribution. Each Python
+  function builds an `Options`, runs one command's data function on a fresh
+  tokio runtime with the GIL released, and converts the result into the
+  frozen dataclasses of
+  [pollen-py/python/pollen/_types.py](pollen-py/python/pollen/_types.py). A
+  failed command raises `pollen.PollenError` carrying the error chain. It
+  holds no logic of its own: it reaches nothing the CLI cannot.
 
 ## Data flow
 
@@ -161,6 +178,22 @@ refusal to overwrite a hand-written skill into an overwrite. The bare names
 are not read at all, because a fallback keeps the collision it exists to
 remove. Genuine cross-tool standards would keep their own names.
 
+**Python bindings run the engine in-process.** The Python package is the
+Rust library compiled into an extension module, not a wrapper around the
+binary, so Python callers get typed results and exceptions without parsing
+output written for people. The reasoning and the alternatives, WebAssembly
+among them, are in [ADR 0001](docs/adr/0001-ship-python-bindings-built-with-pyo3.md).
+The results are dataclasses defined in Python and filled from Rust rather than
+PyO3 classes, so they compare, print and type-check like any other Python
+value. The wheels target the stable ABI from Python 3.11, so one wheel per
+platform covers every later Python. Commands run with the GIL released and
+poll for pending signals every 100 ms on the calling thread, the only one
+where CPython runs signal handlers. That is what turns Ctrl-C into a
+`KeyboardInterrupt` that drops the command, as `SIGINT` does for the CLI.
+Logs go through the `log` facade to Python's `logging`, under loggers named
+after the Rust modules (`pollen.command.update`). Levels are read from Python
+on every record, so a level configured after `import pollen` takes effect.
+
 **Fingerprints, not timestamps.** A skill is unchanged when the source tree
 and the installed tree hash to the same value. Timestamps would be cheaper and
 would lie after a fresh clone; the hash also catches an installed copy someone
@@ -180,6 +213,9 @@ a comment (`revision: <sha>  # v1.2.3`): `autoupdate --freeze` writes it,
 digest. A second file would only repeat the config, and could disagree with it.
 
 ## Invariants and constraints
+
+- The library never writes to stdout. Only the subcommands' `run` functions
+  print, so the Python bindings and any other caller get data, never text.
 
 - Every target directory holds a full, independent copy of the deployed set.
   No target is derived from another, and none is a link into another.
@@ -221,3 +257,8 @@ digest. A second file would only repeat the config, and could disagree with it.
   is passed.
 - Only regular files and directories are copied; a symlink inside a skill is
   skipped with a warning.
+- The Python API is synchronous: a call blocks its thread until the command
+  finishes. There is no `asyncio` variant.
+- The Python package depends on `git` on `PATH` like the CLI, and installing
+  it on a platform with no published wheel builds the sdist, which needs a
+  Rust toolchain.

@@ -1,34 +1,62 @@
 //! `pollen list`: what is deployed in the target directories.
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
 use anyhow::Result;
 
-use crate::cli::Cli;
+use crate::cli::Options;
 use crate::command::Context;
 use crate::state::{InstalledSkill, State};
+
+/// The skills pollen manages in one target directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Deployed {
+    /// The target directory.
+    pub target: PathBuf,
+    /// Its managed skills, keyed by the name they are deployed under.
+    pub skills: BTreeMap<String, InstalledSkill>,
+}
 
 /// Run the subcommand.
 ///
 /// # Errors
 ///
 /// When the config or a target directory's state cannot be read.
-pub fn run(cli: &Cli) -> Result<()> {
-    let context = Context::open(cli)?;
-
-    for (index, target) in context.targets.iter().enumerate() {
-        let state = State::load(target)?;
-        tracing::debug!(target = %target.display(), count = state.skills.len(), "installed skills");
-
+pub fn run(options: &Options) -> Result<()> {
+    for (index, deployed) in installed(options)?.iter().enumerate() {
         if index > 0 {
             println!();
         }
-        println!("{}:", target.display());
+        println!("{}:", deployed.target.display());
 
-        let width = state.skills.keys().map(String::len).max().unwrap_or(0);
-        for (name, skill) in &state.skills {
+        let width = deployed.skills.keys().map(String::len).max().unwrap_or(0);
+        for (name, skill) in &deployed.skills {
             println!("  {name:width$}  {}  {}", origin(skill), skill.source_path);
         }
     }
     Ok(())
+}
+
+/// Read what pollen installed in every target directory `options` resolve to.
+///
+/// # Errors
+///
+/// When the config or a target directory's state cannot be read.
+pub fn installed(options: &Options) -> Result<Vec<Deployed>> {
+    let context = Context::open(options)?;
+    context
+        .targets
+        .into_iter()
+        .map(|target| {
+            let state = State::load(&target)?;
+            tracing::debug!(target = %target.display(), count = state.skills.len(), "installed skills");
+            Ok(Deployed {
+                target,
+                skills: state.skills,
+            })
+        })
+        .collect()
 }
 
 fn origin(skill: &InstalledSkill) -> String {

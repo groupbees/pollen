@@ -65,8 +65,20 @@ your `PATH`, or build it from source with Rust ≥ 1.97.1:
 cargo install --git https://github.com/groupbees/pollen
 ```
 
+With Python ≥ 3.11, the `pollen-skills` package carries the same engine: it
+installs the `pollen` command, and a Python API with typed results rather than
+printed ones:
+
+```sh
+uv tool install pollen-skills   # or: pipx install pollen-skills
+```
+
+Where a policy blocks unsigned executables, `python -m pollen` runs the same
+command through the Python interpreter.
+
 See [Installation](https://groupbees.github.io/pollen/guides/installation/)
-for the platforms and the checksums.
+for the platforms and the checksums, and
+[Python](https://groupbees.github.io/pollen/guides/python/) for the API.
 
 ### Configuration
 

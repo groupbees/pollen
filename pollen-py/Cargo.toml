@@ -1,0 +1,28 @@
+[package]
+name = "pollen-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Python bindings for pollen"
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "_pollen"
+crate-type = ["cdylib"]
+# Tested from Python, in tests/.
+test = false
+doctest = false
+
+[dependencies]
+anyhow = "1.0.104"
+pollen = { path = "../pollen" }
+pyo3 = { version = "0.29.3", features = ["abi3-py311"] }
+pyo3-log = "0.13.4"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "time"] }
+tracing = { version = "0.1.44", features = ["log"] }
+
+[lints]
+workspace = true

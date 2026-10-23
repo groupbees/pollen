@@ -208,7 +208,7 @@ async fn run_validate(args: &[&str]) -> anyhow::Result<()> {
         panic!("not a validate invocation");
     };
     let (configs, config_only, pinned) = (configs.clone(), *config_only, *pinned);
-    pollen::command::validate::run(&cli, &configs, config_only, pinned).await
+    pollen::command::validate::run(&cli.options, &configs, config_only, pinned).await
 }
 
 fn write_config(dir: &Path, name: &str, body: &str) -> String {

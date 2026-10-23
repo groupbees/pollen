@@ -1,12 +1,15 @@
 [workspace]
-members = ["pollen"]
+members = ["pollen", "pollen-py"]
+# The bindings build through maturin, which links them as a Python extension;
+# plain `cargo build` and `cargo test` cover the CLI alone.
+default-members = ["pollen"]
 resolver = "3"
 
 [workspace.package]
 version = "0.5.0"
 edition = "2024"
 rust-version = "1.90"
-authors = ["Guillaume Leroy <guillaume.le-roy@external.thalesgroup.com>"]
+authors = ["GroupBees <contact@groupbees.fr>"]
 repository = "https://github.com/groupbees/pollen"
 license = "Apache-2.0"
 
