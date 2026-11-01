@@ -98,6 +98,19 @@ pub fn current<'a>(revision: &str, tags: &'a [RemoteTag]) -> Option<&'a RemoteTa
     )
 }
 
+/// The stable versions among `tags` newer than `floor`, newest first; all of
+/// them when `floor` is `None`.
+#[must_use]
+pub fn newer_than(tags: &[RemoteTag], floor: Option<Version>) -> Vec<&RemoteTag> {
+    let mut releases: Vec<(Version, &RemoteTag)> = tags
+        .iter()
+        .filter_map(|tag| Version::parse(&tag.name).map(|version| (version, tag)))
+        .filter(|(version, _)| floor.is_none_or(|floor| *version > floor))
+        .collect();
+    releases.sort_by_key(|(version, _)| std::cmp::Reverse(*version));
+    releases.into_iter().map(|(_, tag)| tag).collect()
+}
+
 fn newest<'a>(tags: impl Iterator<Item = &'a RemoteTag>) -> Option<&'a RemoteTag> {
     tags.filter_map(|tag| Version::parse(&tag.name).map(|version| (version, tag)))
         .max_by_key(|(version, _)| *version)
@@ -166,6 +179,27 @@ mod tests {
         ];
 
         assert_eq!(latest(&tags).unwrap().name, "v0.10.0");
+    }
+
+    #[test]
+    fn releases_newer_than_a_version_come_newest_first() {
+        let tags = [
+            tag("v1.0.0", "a"),
+            tag("v1.2.0", "b"),
+            tag("v1.1.0", "c"),
+            tag("v1.3.0-rc1", "d"),
+            tag("nightly", "e"),
+        ];
+        let names = |floor| -> Vec<&str> {
+            newer_than(&tags, floor)
+                .iter()
+                .map(|tag| tag.name.as_str())
+                .collect()
+        };
+
+        assert_eq!(names(Version::parse("v1.0.0")), ["v1.2.0", "v1.1.0"]);
+        assert_eq!(names(Version::parse("v1.2.0")), Vec::<&str>::new());
+        assert_eq!(names(None), ["v1.2.0", "v1.1.0", "v1.0.0"]);
     }
 
     #[test]
