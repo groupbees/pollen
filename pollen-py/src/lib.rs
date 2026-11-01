@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use pollen::cli::Options;
 use pollen::command;
+use pollen::command::outdated::Pending;
 use pollen::version::RemoteTag;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError};
@@ -238,18 +239,20 @@ fn validate(
     })
 }
 
-/// Where each git source stands against its remote's releases.
+/// Where each git source stands against its remote's releases, leaving out
+/// those younger than `min_release_age`.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, min_release_age=None))]
 fn outdated(
     py: Python<'_>,
     config: Option<PathBuf>,
     global_: bool,
     targets: Option<Vec<PathBuf>>,
     cache_dir: Option<PathBuf>,
+    min_release_age: Option<Duration>,
 ) -> PyResult<Vec<Bound<'_, PyAny>>> {
     let options = options(config, global_, targets, cache_dir, false)?;
-    let statuses = block_on(py, command::outdated::statuses(&options))?;
+    let statuses = block_on(py, command::outdated::statuses(&options, min_release_age))?;
 
     statuses
         .iter()
@@ -259,6 +262,7 @@ fn outdated(
                 revision: &status.revision,
                 current: release(py, status.current.as_ref())?,
                 latest: release(py, status.latest.as_ref())?,
+                pending: pending(py, status.pending.as_ref())?,
                 is_outdated: status.is_outdated(),
             })
         })
@@ -270,10 +274,22 @@ fn release<'py>(py: Python<'py>, tag: Option<&RemoteTag>) -> PyResult<Option<Bou
         .transpose()
 }
 
-/// Move every git source to its newest release, rewriting the config file
-/// unless `dry_run`.
+fn pending<'py>(py: Python<'py>, pending: Option<&Pending>) -> PyResult<Option<Bound<'py, PyAny>>> {
+    pending
+        .map(|pending| {
+            record!(py, "PendingRelease" {
+                name: &pending.release.name,
+                commit: &pending.release.commit,
+                age: pending.age,
+            })
+        })
+        .transpose()
+}
+
+/// Move every git source to its newest release at least `min_release_age`
+/// old, rewriting the config file unless `dry_run`.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, freeze=false, dry_run=false))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, freeze=false, dry_run=false, min_release_age=None))]
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn autoupdate(
     py: Python<'_>,
@@ -283,9 +299,13 @@ fn autoupdate(
     cache_dir: Option<PathBuf>,
     freeze: bool,
     dry_run: bool,
+    min_release_age: Option<Duration>,
 ) -> PyResult<Bound<'_, PyAny>> {
     let options = options(config, global_, targets, cache_dir, false)?;
-    let outcome = block_on(py, command::autoupdate::apply(&options, freeze, dry_run))?;
+    let outcome = block_on(
+        py,
+        command::autoupdate::apply(&options, freeze, dry_run, min_release_age),
+    )?;
 
     let bumps = outcome
         .bumps

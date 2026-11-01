@@ -11,6 +11,7 @@ Every option is also an environment variable:
 | --- | --- | --- | --- |
 | `POLLEN_CONFIG_FILE` | no | `pollen.yaml` | Path to the configuration file. |
 | `POLLEN_FREEZE` | no | `false` | Make `autoupdate` pin each source to the commit of its release, as `--freeze` does. |
+| `POLLEN_MIN_RELEASE_AGE` | no | — | Make `outdated` and `autoupdate` leave out releases younger than this age, in whole days or hours (`7d`, `12h`), as `--min-release-age` does. |
 | `POLLEN_GLOBAL` | no | `false` | Use the user-level config and the user-level skill directories, as `--global` does. |
 | `POLLEN_PINNED` | no | `false` | Make `validate` require a full commit SHA on every git source, as `--pinned` does. |
 | `POLLEN_SKILLS_DIR` | no | — | Target directories, overriding the config's `targets`, separated like `PATH`: `;` on Windows, `:` elsewhere. |

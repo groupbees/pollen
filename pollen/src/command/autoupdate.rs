@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use regex::Regex;
@@ -43,8 +44,13 @@ pub struct Outcome {
 ///
 /// When the config cannot be loaded, a remote cannot be reached, or the
 /// rewritten file would not be a valid config.
-pub async fn run(options: &Options, freeze: bool, dry_run: bool) -> Result<()> {
-    let outcome = apply(options, freeze, dry_run).await?;
+pub async fn run(
+    options: &Options,
+    freeze: bool,
+    dry_run: bool,
+    min_age: Option<Duration>,
+) -> Result<()> {
+    let outcome = apply(options, freeze, dry_run, min_age).await?;
     let path = outcome.path.display();
 
     if outcome.bumps.is_empty() {
@@ -62,20 +68,26 @@ pub async fn run(options: &Options, freeze: bool, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-/// Move every git source of the config `options` name to its newest release,
-/// rewriting the file unless `dry_run`.
+/// Move every git source of the config `options` name to its newest release
+/// at least `min_age` old, rewriting the file unless `dry_run`.
 ///
 /// # Errors
 ///
 /// When `options` ask to stay offline, the config cannot be loaded, a remote
 /// cannot be reached, or the rewritten file would not be a valid config.
-pub async fn apply(options: &Options, freeze: bool, dry_run: bool) -> Result<Outcome> {
+pub async fn apply(
+    options: &Options,
+    freeze: bool,
+    dry_run: bool,
+    min_age: Option<Duration>,
+) -> Result<Outcome> {
     if options.offline {
         bail!("`autoupdate` asks every remote for its tags; drop --offline");
     }
     let path = options.config_path();
     let context = Context::open(options)?;
-    let bumps = plan(&outdated::check(&context.config).await?, freeze);
+    let statuses = outdated::check(&context.config, &options.cache_dir(), min_age).await?;
+    let bumps = plan(&statuses, freeze);
 
     let written = !bumps.is_empty() && !dry_run;
     if written {
@@ -387,6 +399,7 @@ repos:
             revision: revision.to_owned(),
             current: current.map(tag),
             latest: Some(tag(latest)),
+            pending: None,
         }
     }
 
