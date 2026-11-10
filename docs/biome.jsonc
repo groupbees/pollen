@@ -5,8 +5,19 @@
 		"clientKind": "git",
 		"useIgnoreFile": true
 	},
+	"files": {
+		// public/favicon.svg links outside docs/; with useIgnoreFile, Biome >= 2.5.15
+		// panics on it unless force-ignored: https://github.com/biomejs/biome/issues/12984
+		"includes": ["**", "!!public/favicon.svg"]
+	},
 	"formatter": {
 		"lineWidth": 120
+	},
+	// The Markdown formatter flattens nested frontmatter keys (sidebar.order).
+	"markdown": {
+		"formatter": {
+			"enabled": false
+		}
 	},
 	"linter": {
 		"rules": {
