@@ -9,11 +9,12 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 # Homebrew only lints formulae that live in a tap, so this one gets a
-# throwaway local tap.
+# throwaway local tap, which it refuses to load until the formula is trusted.
 TAP="pollen-test/formula-check"
 
 work="$(mktemp -d)"
 cleanup() {
+  brew untrust --formula "$TAP/pollen" >/dev/null 2>&1 || true
   brew untap --force "$TAP" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
@@ -43,6 +44,7 @@ done
 
 brew tap-new --no-git "$TAP" >/dev/null
 cp "$work/pollen.rb" "$(brew --repository "$TAP")/Formula/pollen.rb"
+brew trust --formula "$TAP/pollen" >/dev/null
 brew style "$TAP/pollen"
 brew audit --strict --formula "$TAP/pollen"
 
