@@ -1,3 +1,4 @@
+from datetime import timedelta
 from os import PathLike
 from typing import TypeAlias
 
@@ -48,6 +49,7 @@ def outdated(
     global_: bool = False,
     targets: list[StrPath] | None = None,
     cache_dir: StrPath | None = None,
+    min_release_age: timedelta | None = None,
 ) -> list[SourceStatus]:
     """Where each git source stands against its remote's releases."""
 
@@ -59,6 +61,7 @@ def autoupdate(
     cache_dir: StrPath | None = None,
     freeze: bool = False,
     dry_run: bool = False,
+    min_release_age: timedelta | None = None,
 ) -> AutoupdateOutcome:
     """Move every git source to its newest release."""
 

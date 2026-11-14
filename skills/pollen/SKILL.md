@@ -80,6 +80,7 @@ pollen update [--dry-run]           # deploy; -g for the machine-wide config
 pollen list                         # what is deployed, from which commit
 pollen outdated                     # newer release per source
 pollen autoupdate [--freeze]        # bump every source (rewrites revision: lines only)
+pollen autoupdate --freeze --min-release-age 7d   # only to releases at least 7 days old
 pollen validate [--config-only] [--pinned]   # check config and skills; --pinned requires commits
 pollen show <repo> [--revision R] [--path P] [--format json]   # what a source provides; writes nothing
 ```

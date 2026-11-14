@@ -7,6 +7,7 @@ import re
 import sys
 import threading
 import time
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -120,6 +121,21 @@ def test_outdated_reports_a_newer_release(workspace: Path, origin: Path, cache_d
     assert status.is_outdated
 
 
+def test_outdated_holds_back_a_release_younger_than_the_minimum_age(
+    workspace: Path, origin: Path, cache_dir: Path
+) -> None:
+    commit = commit_and_tag(origin, "v1.1.0")
+
+    [status] = pollen.outdated(cache_dir=cache_dir, min_release_age=timedelta(days=7))
+
+    assert status.latest == status.current
+    assert status.pending is not None
+    assert (status.pending.name, status.pending.commit) == ("v1.1.0", commit)
+    assert status.pending.age is not None
+    assert status.pending.age < timedelta(hours=1)
+    assert not status.is_outdated
+
+
 def test_autoupdate_rewrites_the_revision(workspace: Path, origin: Path, cache_dir: Path) -> None:
     commit = commit_and_tag(origin, "v1.1.0")
 
@@ -128,6 +144,19 @@ def test_autoupdate_rewrites_the_revision(workspace: Path, origin: Path, cache_d
     [bump] = outcome.bumps
     assert (bump.from_revision, bump.to_revision, bump.release) == ("v1.0.0", commit, "v1.1.0")
     assert outcome.written
+    assert f"revision: {commit}  # v1.1.0" in (workspace / "pollen.yaml").read_text()
+
+
+def test_autoupdate_moves_to_the_newest_release_old_enough(
+    workspace: Path, origin: Path, cache_dir: Path
+) -> None:
+    commit = commit_and_tag(origin, "v1.1.0", days_ago=30)
+    commit_and_tag(origin, "v1.2.0")
+
+    outcome = pollen.autoupdate(cache_dir=cache_dir, freeze=True, min_release_age=timedelta(days=7))
+
+    [bump] = outcome.bumps
+    assert (bump.to_revision, bump.release) == (commit, "v1.1.0")
     assert f"revision: {commit}  # v1.1.0" in (workspace / "pollen.yaml").read_text()
 
 

@@ -332,3 +332,89 @@ async fn pinned_validation_requires_a_commit_on_every_git_source() {
         .to_string();
     assert!(error.contains("not pinned to a commit"), "{error}");
 }
+
+/// Commit and tag `tag` in `root`, dated `days_ago` days back.
+fn release(root: &Path, tag: &str, days_ago: u64) {
+    if !root.join(".git").exists() {
+        git(root, &["init", "--quiet", "--initial-branch", "main"]);
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let date = format!("{} +0000", now - days_ago * 24 * 60 * 60);
+    for args in [
+        vec!["commit", "--quiet", "--allow-empty", "--message", tag],
+        vec!["tag", tag],
+    ] {
+        let output = Command::new("git")
+            .args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"])
+            .args(&args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "pollen tests")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "pollen tests")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .env("GIT_AUTHOR_DATE", &date)
+            .env("GIT_COMMITTER_DATE", &date)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+/// Drive `pollen autoupdate` exactly as the command line would.
+async fn run_autoupdate(args: &[&str]) -> anyhow::Result<()> {
+    use clap::Parser as _;
+
+    let cli = pollen::cli::Cli::parse_from(std::iter::once("pollen").chain(args.iter().copied()));
+    let pollen::cli::Command::Autoupdate {
+        freeze,
+        dry_run,
+        min_release_age,
+    } = &cli.command
+    else {
+        panic!("not an autoupdate invocation");
+    };
+    pollen::command::autoupdate::run(&cli.options, *freeze, *dry_run, *min_release_age).await
+}
+
+#[tokio::test]
+async fn autoupdate_passes_over_a_release_younger_than_the_minimum_age() {
+    let origin = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    release(origin.path(), "v1.0.0", 60);
+    release(origin.path(), "v1.1.0", 30);
+    release(origin.path(), "v1.2.0", 1);
+    let config = write_config(
+        workspace.path(),
+        "pollen.yaml",
+        &format!(
+            "repos:\n  - repo: {}\n    revision: v1.0.0\n    paths:\n      - path: .\n",
+            origin.path().display()
+        ),
+    );
+    let online = [
+        "--config",
+        &config,
+        "--cache-dir",
+        cache.path().to_str().unwrap(),
+        "autoupdate",
+        "--min-release-age",
+        "7d",
+    ];
+    let offline: Vec<&str> = std::iter::once("--offline").chain(online).collect();
+
+    let error = run_autoupdate(&offline).await.unwrap_err().to_string();
+    assert!(error.contains("drop --offline"), "{error}");
+
+    run_autoupdate(&online).await.unwrap();
+
+    let written = std::fs::read_to_string(&config).unwrap();
+    assert!(written.contains("revision: v1.1.0\n"), "{written}");
+}

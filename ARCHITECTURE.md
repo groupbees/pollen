@@ -70,7 +70,9 @@ to a module under [pollen/src/](pollen/src/), except the last.
 - **[version](pollen/src/version.rs)** — which of a remote's tags are releases
   (stable `vX.Y.Z`), which is newest, and which one a revision stands for.
   `outdated` and `autoupdate` read the tags with `git ls-remote`, without
-  fetching; `autoupdate` rewrites the `revision:` lines in place rather than
+  fetching. With a minimum release age they also need the date of each
+  release they would move to, so they fetch those tags one commit deep.
+  `autoupdate` rewrites the `revision:` lines in place rather than
   re-serialising the YAML, so comments and layout survive.
 - **[command](pollen/src/command.rs)** — the subcommands. `show` checks one source
   out without any config and lists what it holds, invalid skills included.
@@ -126,7 +128,9 @@ Two stores, both disposable.
 - **The git cache**, at `$POLLEN_CACHE_DIR` (`<user cache>/pollen` by default), one
   checkout per `(url, revision)`. Keying on the revision as well as the URL is
   what lets one config pin two revisions of the same repository without the
-  two checkouts fighting. Deleting the cache costs a refetch and nothing else.
+  two checkouts fighting. A minimum release age adds one bare repository per
+  remote, holding the release tags whose dates were read. Deleting the cache
+  costs a refetch and nothing else.
 - **The state file**, `.pollen.json` inside each target directory, mapping
   each installed skill name to its source, revision, resolved commit and tree
   fingerprint, and naming the config file that owns the directory. It lives
@@ -255,6 +259,8 @@ digest. A second file would only repeat the config, and could disagree with it.
   its source, and the next `update` overwrites the edit.
 - A source is fetched over the network on every `update` unless `--offline`
   is passed.
+- A release's age is the date on its tag, which whoever makes the tag sets.
+  A backdated tag passes `--min-release-age`.
 - Only regular files and directories are copied; a symlink inside a skill is
   skipped with a warning.
 - The Python API is synchronous: a call blocks its thread until the command

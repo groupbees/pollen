@@ -65,6 +65,26 @@ release in a comment (`revision: <sha>  # v0.2.0`); run on an up-to-date tag,
 it only freezes it. Only stable `vX.Y.Z` or `X.Y.Z` tags count as releases,
 and a branch revision is left alone.
 
+Leave out releases younger than a minimum age, so that a broken or compromised
+release has time to be found and withdrawn before it reaches you:
+
+```sh
+pollen outdated --min-release-age 7d
+pollen autoupdate --freeze --min-release-age 7d
+```
+
+Each source then moves to the newest release at least that old, and
+`outdated` names the newest one it passed over (`v0.3.0 is 2 days old`). The
+age is whole days or hours (`7d`, `12h`); `0d` turns it off. A source already
+pinned to a release keeps it, whatever its age. A source pinned to a commit that
+no release names moves to the newest release old enough, even when that release
+is older than the commit.
+
+The age comes from the tag: the tagger date of an annotated tag, the committer
+date of a lightweight one. Whoever makes the tag sets that date, so a
+backdated tag passes. To read it, pollen fetches each candidate tag one commit
+deep into the cache.
+
 See what a git source provides before adding it to the config — each skill's
 path, in the form `paths:` takes, its description, and the commit to pin:
 

@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::process::Stdio;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
@@ -184,6 +185,82 @@ pub async fn remote_tags(url: &str, dir: &Path) -> Result<Vec<RemoteTag>> {
     Ok(parse_ls_remote(&output))
 }
 
+/// When `tag` was made on `url`: the tagger date of an annotated tag, the
+/// committer date of a lightweight one, or `None` when git records neither.
+///
+/// The tag is fetched one commit deep into a bare repository kept per remote
+/// under the cache, so asking again fetches nothing new. `dir` is where `git`
+/// runs, as for [`remote_tags`].
+///
+/// # Errors
+///
+/// When the fetch fails, or the tag no longer points to `tag.commit`.
+pub async fn tag_date(
+    url: &str,
+    tag: &RemoteTag,
+    dir: &Path,
+    cache_dir: &Path,
+) -> Result<Option<SystemTime>> {
+    let tags_dir = std::path::absolute(cache_dir.join("tags").join(cache_key(url, "")))
+        .context("cannot resolve the cache directory")?;
+    if !tags_dir.join("HEAD").exists() {
+        tokio::fs::create_dir_all(&tags_dir)
+            .await
+            .with_context(|| format!("cannot create the cache directory {}", tags_dir.display()))?;
+        git(&tags_dir, &["init", "--quiet", "--bare"]).await?;
+    }
+    let git_dir = tags_dir
+        .to_str()
+        .context("the cache directory is not valid UTF-8")?;
+
+    let reference = format!("refs/tags/{}", tag.name);
+    git(
+        dir,
+        &[
+            "--git-dir",
+            git_dir,
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--depth",
+            "1",
+            url,
+            &format!("+{reference}:{reference}"),
+        ],
+    )
+    .await
+    .with_context(|| format!("cannot fetch `{}` from {url} to read its date", tag.name))?;
+
+    let record = git(
+        dir,
+        &[
+            "--git-dir",
+            git_dir,
+            "for-each-ref",
+            "--format=%(objectname)%09%(*objectname)%09%(creatordate:unix)",
+            &reference,
+        ],
+    )
+    .await?;
+    let mut fields = record.trim_end_matches(['\r', '\n']).split('\t');
+    let (object, peeled, date) = (
+        fields.next().unwrap_or_default(),
+        fields.next().unwrap_or_default(),
+        fields.next().unwrap_or_default(),
+    );
+    let commit = if peeled.is_empty() { object } else { peeled };
+    if !commit.eq_ignore_ascii_case(&tag.commit) {
+        bail!(
+            "`{}` moved on {url} while pollen read it; run again",
+            tag.name
+        );
+    }
+    Ok(date
+        .parse()
+        .ok()
+        .map(|seconds| UNIX_EPOCH + Duration::from_secs(seconds)))
+}
+
 /// Whether the remote has a branch named `revision` and no tag of that name.
 ///
 /// Asked of the remote because a pinned fetch leaves no local ref behind to
@@ -353,6 +430,116 @@ mod tests {
         assert!(names_a_branch(&branch.root, "main").await);
         assert!(!names_a_branch(&tag.root, "v1.0.0").await);
         assert!(!names_a_branch(&tag.root, "nothing").await);
+    }
+
+    #[tokio::test]
+    async fn dates_a_tag_by_its_tagger_or_its_commit_whatever_the_time_zone() {
+        let origin = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let root = origin.path();
+        dated(root, "1700000000 +1400", &["init", "--quiet"]);
+        dated(
+            root,
+            "1700000000 +1400",
+            &["commit", "--quiet", "--allow-empty", "--message", "seed"],
+        );
+        dated(root, "1700000000 +1400", &["tag", "v1.0.0"]);
+        dated(
+            root,
+            "1710000000 -1200",
+            &["tag", "--annotate", "--message", "v1.1.0", "v1.1.0"],
+        );
+        let url = root.to_str().unwrap();
+
+        let mut dates = Vec::new();
+        for tag in remote_tags(url, cache.path()).await.unwrap() {
+            dates.push(
+                tag_date(url, &tag, cache.path(), cache.path())
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        assert_eq!(
+            dates,
+            [
+                Some(UNIX_EPOCH + Duration::from_secs(1_700_000_000)),
+                Some(UNIX_EPOCH + Duration::from_secs(1_710_000_000)),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tag_without_a_tagger_has_no_date() {
+        let origin = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let root = origin.path();
+        dated(root, DATE, &["init", "--quiet"]);
+        dated(
+            root,
+            DATE,
+            &["commit", "--quiet", "--allow-empty", "--message", "seed"],
+        );
+        let commit = dated(root, DATE, &["rev-parse", "HEAD"]);
+        std::fs::write(
+            root.join("tag"),
+            format!("object {commit}\ntype commit\ntag v1.0.0\n\nNo tagger line.\n"),
+        )
+        .unwrap();
+        let object = dated(
+            root,
+            DATE,
+            &["hash-object", "-t", "tag", "-w", "--literally", "tag"],
+        );
+        dated(root, DATE, &["update-ref", "refs/tags/v1.0.0", &object]);
+        let url = root.to_str().unwrap();
+        let tags = remote_tags(url, cache.path()).await.unwrap();
+
+        let date = tag_date(url, &tags[0], cache.path(), cache.path()).await;
+
+        assert_eq!(date.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn refuses_a_tag_that_moved_since_it_was_listed() {
+        let origin = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        seed_repository(origin.path());
+        let url = origin.path().to_str().unwrap();
+        let mut tag = remote_tags(url, cache.path()).await.unwrap().remove(0);
+        tag.commit = "0".repeat(40);
+
+        let error = tag_date(url, &tag, cache.path(), cache.path())
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("moved"), "{error}");
+    }
+
+    const DATE: &str = "1700000000 +0000";
+
+    /// Run `git` in `root` with `date` as the author, committer and tagger
+    /// date, and return what it printed.
+    fn dated(root: &Path, date: &str, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"])
+            .args(args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "pollen tests")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "pollen tests")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
     }
 
     fn seed_repository(root: &Path) {

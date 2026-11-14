@@ -1,4 +1,6 @@
+import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -12,22 +14,30 @@ def write_skill(directory: Path, name: str, description: str | None = None) -> N
     )
 
 
-def git(root: Path, *args: str) -> str:
+def git(root: Path, *args: str, env: dict[str, str] | None = None) -> str:
     return subprocess.run(
-        ["git", *args], cwd=root, check=True, capture_output=True, text=True
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=None if env is None else os.environ | env,
     ).stdout.strip()
 
 
-def commit_and_tag(root: Path, tag: str) -> str:
+def commit_and_tag(root: Path, tag: str, *, days_ago: int = 0) -> str:
+    """Commit everything and tag it, dated `days_ago` days back."""
     if not (root / ".git").exists():
         git(root, "init", "--quiet", "--initial-branch", "main")
         git(root, "config", "user.email", "test@example.invalid")
         git(root, "config", "user.name", "pollen tests")
         git(root, "config", "commit.gpgsign", "false")
         git(root, "config", "tag.gpgsign", "false")
+    date = f"{int(time.time()) - days_ago * 24 * 60 * 60} +0000"
+    dated = {"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
     git(root, "add", ".")
-    git(root, "commit", "--quiet", "--allow-empty", "--message", tag)
-    git(root, "tag", tag)
+    git(root, "commit", "--quiet", "--allow-empty", "--message", tag, env=dated)
+    git(root, "tag", tag, env=dated)
     return git(root, "rev-parse", "HEAD")
 
 

@@ -2,6 +2,7 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -181,7 +182,21 @@ pub enum Command {
     Schema,
 
     /// Show which git sources have a newer release than the one pinned.
-    Outdated,
+    Outdated {
+        /// Leave out releases younger than this: whole days or hours, `7d`
+        /// or `12h`. `0d` turns it off.
+        ///
+        /// A release's age is the date on its tag: the tagger date of an
+        /// annotated tag, the committer date of a lightweight one. Each
+        /// candidate tag is fetched one commit deep, into the cache, to read it.
+        #[arg(
+            long,
+            env = "POLLEN_MIN_RELEASE_AGE",
+            value_name = "AGE",
+            value_parser = parse_age
+        )]
+        min_release_age: Option<Duration>,
+    },
 
     /// Move every git source to its newest release, rewriting `pollen.yaml`.
     ///
@@ -196,6 +211,20 @@ pub enum Command {
         /// Show what would change without writing the file.
         #[arg(long, env = "POLLEN_DRY_RUN")]
         dry_run: bool,
+
+        /// Leave out releases younger than this: whole days or hours, `7d`
+        /// or `12h`. `0d` turns it off.
+        ///
+        /// A release's age is the date on its tag: the tagger date of an
+        /// annotated tag, the committer date of a lightweight one. Each
+        /// candidate tag is fetched one commit deep, into the cache, to read it.
+        #[arg(
+            long,
+            env = "POLLEN_MIN_RELEASE_AGE",
+            value_name = "AGE",
+            value_parser = parse_age
+        )]
+        min_release_age: Option<Duration>,
     },
 
     /// List the skills a git source provides, before adding it to a config.
@@ -219,6 +248,26 @@ pub enum Command {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+}
+
+/// Read an age given as whole days or hours: `7d`, `36h`.
+fn parse_age(text: &str) -> Result<Duration, String> {
+    const HOUR: u64 = 60 * 60;
+
+    [('d', 24 * HOUR), ('h', HOUR)]
+        .into_iter()
+        .find_map(|(suffix, unit)| {
+            let count = text.strip_suffix(suffix)?;
+            // `u64::from_str` also takes a leading `+`.
+            if count.is_empty() || !count.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            count.parse::<u64>().ok()?.checked_mul(unit)
+        })
+        .map(Duration::from_secs)
+        .ok_or_else(|| {
+            format!("`{text}` is not a whole number of days or hours, like `7d` or `12h`")
+        })
 }
 
 /// How `show` prints its listing.
@@ -294,10 +343,14 @@ async fn run(cli: &Cli) -> Result<()> {
             pinned,
         } => command::validate::run(options, configs, *config_only, *pinned).await,
         Command::Schema => command::schema::run(),
-        Command::Outdated => command::outdated::run(options).await,
-        Command::Autoupdate { freeze, dry_run } => {
-            command::autoupdate::run(options, *freeze, *dry_run).await
+        Command::Outdated { min_release_age } => {
+            command::outdated::run(options, *min_release_age).await
         }
+        Command::Autoupdate {
+            freeze,
+            dry_run,
+            min_release_age,
+        } => command::autoupdate::run(options, *freeze, *dry_run, *min_release_age).await,
         Command::Show {
             repo,
             revision,
@@ -360,6 +413,43 @@ mod tests {
         let result = Cli::try_parse_from(["pollen", "-g", "--config", "other.yaml", "update"]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_minimum_release_age_reads_days_or_hours() {
+        const HOUR: u64 = 60 * 60;
+
+        assert_eq!(parse_age("7d"), Ok(Duration::from_secs(7 * 24 * HOUR)));
+        assert_eq!(parse_age("36h"), Ok(Duration::from_secs(36 * HOUR)));
+        assert_eq!(parse_age("0d"), Ok(Duration::ZERO));
+        for text in ["7", "d", "", "-1d", "+1d", "1.5d", "7 d", "7D", "1w", "７d"] {
+            assert!(parse_age(text).is_err(), "{text}");
+        }
+        assert!(parse_age(&format!("{}d", u64::MAX)).is_err());
+    }
+
+    #[test]
+    fn outdated_and_autoupdate_take_a_minimum_release_age() {
+        let week = Some(Duration::from_secs(7 * 24 * 60 * 60));
+
+        let outdated = Cli::parse_from(["pollen", "outdated", "--min-release-age", "7d"]);
+        let autoupdate = Cli::parse_from([
+            "pollen",
+            "autoupdate",
+            "--freeze",
+            "--min-release-age",
+            "7d",
+        ]);
+
+        assert!(matches!(
+            outdated.command,
+            Command::Outdated { min_release_age } if min_release_age == week
+        ));
+        assert!(matches!(
+            autoupdate.command,
+            Command::Autoupdate { min_release_age, .. } if min_release_age == week
+        ));
+        assert!(Cli::try_parse_from(["pollen", "outdated", "--min-release-age", "7"]).is_err());
     }
 
     #[cfg(unix)]

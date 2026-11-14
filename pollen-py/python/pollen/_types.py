@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import StrEnum
 from pathlib import Path
 
@@ -95,6 +96,16 @@ class Release:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class PendingRelease:
+    """A release left out for being younger than the minimum release age."""
+
+    name: str
+    commit: str
+    age: timedelta | None
+    """How old its tag is, `None` when git records no date for it."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SourceStatus:
     """Where one git source stands against its remote's releases."""
 
@@ -103,6 +114,9 @@ class SourceStatus:
     current: Release | None
     """The release the pinned revision stands for, when it is one."""
     latest: Release | None
+    """The newest release; with `min_release_age`, the newest one that old."""
+    pending: PendingRelease | None
+    """The newest release `latest` leaves out for being too young."""
     is_outdated: bool
 
 
