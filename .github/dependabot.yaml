@@ -50,10 +50,24 @@ updates:
     cooldown:
       default-days: 3
     groups:
+      # src/base-links.ts must build against the satteri that
+      # @astrojs/markdown-satteri uses, and Starlight and its plugins pin
+      # satteri too: one member bumped alone fails astro check on two copies.
+      astro:
+        patterns:
+          - astro
+          - "@astrojs/*"
+          - satteri
+          - starlight-*
       patch-and-minor:
         update-types:
           - patch
           - minor
+        exclude-patterns:
+          - astro
+          - "@astrojs/*"
+          - satteri
+          - starlight-*
     ignore:
       # @astrojs/check accepts TypeScript ^5 || ^6 only; a newer major fails npm ci.
       - dependency-name: typescript

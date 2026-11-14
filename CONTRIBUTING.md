@@ -184,7 +184,7 @@ pre-commit run cargo-clippy --all-files
 | `pollen-validate` | [examples/pollen.yaml](examples/pollen.yaml) still satisfies the config rules | Fix the example, or the rule that broke it |
 | `pollen-schema` | [schema/pollen.schema.json](schema/pollen.schema.json) matches the config types | Re-run; the hook rewrites the file |
 | `shellcheck` | The scripts in [scripts/](scripts/) | Fix the script |
-| `docs-biome` | Biome lint and format of the site, per [docs/biome.json](docs/biome.json) | `npm --prefix docs run format` |
+| `docs-biome` | Biome lint and format of the site, per [docs/biome.jsonc](docs/biome.jsonc) | `npm --prefix docs run format` |
 | `docs-astro-check` | Types and page frontmatter of the site | Fix the file it names |
 | `no-co-authors` | The commit message carries no `Co-Authored-By:` trailer and no `Generated with` line; runs at `commit-msg`, so `--all-files` and CI skip it | Rewrite the message |
 
