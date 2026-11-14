@@ -1,6 +1,6 @@
 ---
 name: pollen
-description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml, seeing what skills a source provides before adding it (pollen show), adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning).
+description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml or its credentials.yaml, adding a well-known (LiteLLM, discovery index) source, seeing what skills a source provides before adding it (pollen show), adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning).
 ---
 
 # pollen
@@ -56,6 +56,22 @@ repos:
   - repo: local                              # paths next to this file
     paths:
       - path: .skills
+  - well-known: https://gateway.example.com  # serves /.well-known/agent-skills/index.json
+    skills:                                  # or `exclude: <regex>` to take the rest
+      - name: pdf-summarizer
+        digest: sha256:<64 hex>              # the pin; autoupdate --freeze writes it
+```
+
+A `well-known` origin (a LiteLLM gateway, a docs site) takes no `revision` or
+`paths`. Its token goes in `~/.config/pollen/credentials.yaml`, never in
+`pollen.yaml`:
+
+```yaml
+credentials:
+  - origin: https://gateway.example.com
+    command:                                 # prints a bearer token; or `env: VAR`
+      - my-sso-cli
+      - token
 ```
 
 Skills deploy flat under their folder name, so names must be unique across
@@ -72,6 +88,9 @@ sources. Before adding a source, `pollen show <repo>` lists its skills — the
   skills have no transitive dependencies, so a lockfile would only repeat it.
   Do not add one.
 - Write the tag, then let `pollen autoupdate --freeze` turn it into its commit.
+- A `well-known` skill is pinned by its `digest`. The index only serves the
+  current artifact, so when the publisher replaces it a pinned run fails:
+  `pollen outdated`, then `pollen autoupdate`.
 
 ## Commands
 
@@ -96,6 +115,8 @@ pollen show <repo> [--revision R] [--path P] [--format json]   # what a source p
 | `… is managed by another config, …` | Declare the source in that config; `--force` hands the directory over |
 | `` `main` is a branch `` (warning) | Pin a tag, then `pollen autoupdate --freeze` |
 | `two sources provide …` | Rename one skill, or `exclude` it in one source |
+| `` … is pinned to sha256:…, but the index publishes … `` | The publisher replaced the skill: `pollen outdated`, then `pollen autoupdate` |
+| `… requires authentication (401 …)` | Add the origin to `~/.config/pollen/credentials.yaml` |
 
 ## Don't
 

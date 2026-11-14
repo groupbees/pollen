@@ -29,31 +29,70 @@
     },
     "RepoSpec": {
       "additionalProperties": false,
-      "description": "One source of skills: a git repository, or the config file's own directory.",
-      "else": {
-        "properties": {
-          "revision": {
-            "minLength": 1,
-            "type": "string"
+      "description": "One source of skills: a git repository, the config file's own directory,\nor an origin publishing an Agent Skills discovery index.",
+      "oneOf": [
+        {
+          "else": {
+            "properties": {
+              "revision": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "revision"
+            ]
+          },
+          "if": {
+            "properties": {
+              "repo": {
+                "const": "local"
+              }
+            }
+          },
+          "properties": {
+            "exclude": false,
+            "skills": false,
+            "well-known": false
+          },
+          "required": [
+            "repo",
+            "paths"
+          ],
+          "then": {
+            "properties": {
+              "revision": false
+            }
           }
         },
-        "required": [
-          "revision"
-        ]
-      },
-      "if": {
-        "properties": {
-          "repo": {
-            "const": "local"
-          }
-        },
-        "required": [
-          "repo"
-        ]
-      },
+        {
+          "not": {
+            "required": [
+              "exclude",
+              "skills"
+            ]
+          },
+          "properties": {
+            "paths": false,
+            "repo": false,
+            "revision": false
+          },
+          "required": [
+            "well-known"
+          ]
+        }
+      ],
       "properties": {
+        "exclude": {
+          "description": "Regular expression rejecting the skills of a `well-known` index whose\nname matches. Only with every skill of the index, not with `skills`.",
+          "format": "regex",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "paths": {
-          "description": "Where to look for skills inside the source.",
+          "description": "Where to look for skills inside a git or `local` source.",
           "items": {
             "$ref": "#/$defs/PathSpec"
           },
@@ -66,22 +105,54 @@
           "type": "string"
         },
         "revision": {
-          "description": "The git revision to check out: a tag, a branch or a commit.\n\nRequired for a git source, and forbidden on `local`.",
+          "description": "The git revision to check out: a tag, a branch or a commit.\n\nRequired for a git source, and forbidden on `local` and `well-known`.",
           "type": [
             "string",
             "null"
           ]
+        },
+        "skills": {
+          "description": "The skills to take from a `well-known` index, instead of all of them.",
+          "items": {
+            "$ref": "#/$defs/SkillPin"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "well-known": {
+          "description": "An `https://` origin serving `/.well-known/agent-skills/index.json`,\nwhose skills are downloaded and checked against the index's digests.",
+          "format": "uri",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SkillPin": {
+      "additionalProperties": false,
+      "description": "One skill taken from a `well-known` index.",
+      "properties": {
+        "digest": {
+          "description": "The SHA-256 of the artifact to deploy, as the index writes it:\n`sha256:` and 64 lowercase hex digits. A run fails rather than deploy\nanything else.",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The skill's name in the index.",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "type": "string"
         }
       },
       "required": [
-        "repo",
-        "paths"
+        "name"
       ],
-      "then": {
-        "properties": {
-          "revision": false
-        }
-      },
       "type": "object"
     }
   },

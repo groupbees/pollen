@@ -67,6 +67,9 @@ fn origin(skill: &InstalledSkill) -> String {
             &commit[..commit.len().min(8)]
         ),
         (Some(revision), None) => format!("{}@{revision}", skill.repo),
-        _ => skill.repo.clone(),
+        _ => match &skill.digest {
+            Some(digest) => format!("{} ({})", skill.repo, &digest[..digest.len().min(15)]),
+            None => skill.repo.clone(),
+        },
     }
 }

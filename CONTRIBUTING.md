@@ -101,11 +101,13 @@ There are two layers in `pollen`, both run by the command above:
 - **Unit tests**, inside each module in [pollen/src/](pollen/src/). The ones
   in [pollen/src/command/update.rs](pollen/src/command/update.rs) drive the
   orchestration through a `mockall` double of the `Materializer` trait, so
-  they never touch a network.
+  they never touch a network. The `well-known` source and its HTTP client are
+  tested against a `wiremock` server listening on `127.0.0.1`.
 - **An end-to-end test**,
   [pollen/tests/end_to_end.rs](pollen/tests/end_to_end.rs), which builds a
   real git repository in a temporary directory, tags it, and runs the real
-  fetch-discover-install path against it.
+  fetch-discover-install path against it, and does the same for a
+  `well-known` origin served by `wiremock`.
 
 Everything runs offline and needs no fixtures or services — but `git` must be
 on `PATH`, since the tests that create a repository call it. They configure
@@ -136,6 +138,19 @@ the version picker and the link rewriting:
 
 ```sh
 npm --prefix docs test
+```
+
+pollen is also checked against a real gateway: a LiteLLM proxy and its
+Postgres, from [tests/litellm/docker-compose.yaml](tests/litellm/docker-compose.yaml).
+The script uploads the skills under
+[tests/litellm/skills/](tests/litellm/skills/), then deploys, freezes,
+validates and re-checks them through the proxy's `well-known` index. It is
+not part of `cargo test`, which stays offline: it pulls images and starts
+services. It needs Docker with Compose, `curl` and `zip`, and port 4000 free
+(`POLLEN_LITELLM_PORT` picks another):
+
+```sh
+tests/litellm.sh
 ```
 
 The Homebrew formula generator is checked against a fabricated `SHA256SUMS`
@@ -205,7 +220,7 @@ commit gate stays fast.
 
 | Workflow | Triggers on | What it does | Reproduce locally |
 | --- | --- | --- | --- |
-| [quality.yaml](.github/workflows/quality.yaml) | every push to `main`, every pull request | `pre-commit run --all-files` on Linux, `cargo test --all-targets --locked` on both Linux (`ubuntu-24.04`) and Windows (`windows-2025`), the Python bindings' tests on both with Python 3.11 and 3.14, the documentation site's tests, and the Homebrew formula check on macOS | `pre-commit run --all-files`, `cargo test --all-targets --locked`, `uv run --directory pollen-py pytest`, `npm --prefix docs test` and `tests/homebrew-formula.sh`; for Windows, `cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings` type-checks the Windows code paths from any host |
+| [quality.yaml](.github/workflows/quality.yaml) | every push to `main`, every pull request | `pre-commit run --all-files` on Linux, `cargo test --all-targets --locked` on both Linux (`ubuntu-24.04`) and Windows (`windows-2025`), the Python bindings' tests on both with Python 3.11 and 3.14, the documentation site's tests, the LiteLLM check on Linux, and the Homebrew formula check on macOS | `pre-commit run --all-files`, `cargo test --all-targets --locked`, `uv run --directory pollen-py pytest`, `npm --prefix docs test`, `tests/litellm.sh` and `tests/homebrew-formula.sh`; for Windows, `cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings` type-checks the Windows code paths from any host |
 | [docs.yaml](.github/workflows/docs.yaml) | pushes to `main` and pull requests touching `docs/`, `assets/` or the workflow; manual | Builds every version of the documentation site, links validated; on `main`, deploys it to GitHub Pages | `git fetch --tags` then `npm --prefix docs run build:versions` |
 | [security.yaml](.github/workflows/security.yaml) | every push to `main`, every pull request, daily, manual | `trivy fs` over the repo, failing on fixable `HIGH`/`CRITICAL`, and a second non-blocking scan uploaded to code scanning | `trivy fs .` |
 | [release.yaml](.github/workflows/release.yaml) | tag `v*` | Checks the tag against `Cargo.toml`, builds the `.tar.gz` archives for Linux (musl, x86_64 and arm64) and macOS (arm64 and x86_64) and the `.zip` archives for Windows (MSVC, x86_64 and arm64, each on its native runner), creates the GitHub release with a `SHA256SUMS` over all of them and notes starting from the previous stable tag, installs and tests the Homebrew formula rendered from that `SHA256SUMS` and pushes it to [groupbees/homebrew-tap](https://github.com/groupbees/homebrew-tap), then runs `docs` on `main` so the site's root serves the new release. Alongside, builds the Python wheels (abi3, Python ≥ 3.11) for the same platforms plus musllinux, checks that each native one imports, builds the sdist, and publishes them to PyPI as `pollen-skills`. A pre-release tag (`v0.2.0-rc1`) builds the archives and keeps them as workflow artifacts, without a release page; its wheels still go to PyPI, as a pre-release pip installs only when asked | `uvx maturin build --release --manifest-path pollen-py/Cargo.toml` builds the wheel for the host |

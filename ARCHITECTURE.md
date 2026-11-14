@@ -8,7 +8,7 @@ directories those sources select, and then makes each target directory match
 that set — installing, replacing and removing as needed. The sources are
 fetched and validated once and applied to every target, so deploying to two
 directories costs one fetch. Nothing runs in the background, and nothing is
-left behind between runs except a git cache and one state file per target.
+left behind between runs except a cache and one state file per target.
 The same engine runs behind the `pollen` binary and behind the `pollen`
 Python package, which calls it in-process.
 
@@ -16,9 +16,12 @@ Python package, which calls it in-process.
 flowchart LR
     yaml[pollen.yaml] -->|parse + validate| config[config]
     config -->|per repo| source[source]
-    source -->|git clone/fetch, sync| cache[(git cache)]
+    source -->|git clone/fetch, sync| cache[(cache)]
+    source -->|index + artifacts over HTTPS| origin[(well-known origin)]
+    credentials[(credentials file)] -->|bearer token per origin| source
     source -->|root directory| discovery[discovery]
-    discovery -->|candidate dirs| skill[skill]
+    source -->|skill directories, well-known| skill[skill]
+    discovery -->|candidate dirs| skill
     skill -->|validated frontmatter| plan[plan]
     plan -->|desired set| update[update]
     state[(state file, one per target)] -->|owned skills| update
@@ -33,9 +36,10 @@ and [pollen-py/](pollen-py/), the Python bindings. Each component below maps
 to a module under [pollen/src/](pollen/src/), except the last.
 
 - **[config](pollen/src/config.rs)** — owns the schema of `pollen.yaml` and every
-  rule about it: a git source is pinned to a revision, `local` is not, a
-  `path` never climbs out of its source, an `exclude` compiles as a regular
-  expression. It resolves the target directories from the CLI overrides, the
+  rule about it: an entry is a `repo` or a `well-known` origin, a git source
+  is pinned to a revision, `local` and `well-known` are not, a `path` never
+  climbs out of its source, an `exclude` compiles as a regular expression, a
+  `digest` is a lowercase SHA-256. It resolves the target directories from the CLI overrides, the
   config, then the default pair (in the working directory, or in the home
   directory with `--global`, which also reads the user-level config),
   dropping duplicates. It knows nothing about
@@ -45,7 +49,19 @@ to a module under [pollen/src/](pollen/src/), except the last.
   file's own directory; a git source goes through
   [source/git](pollen/src/source/git.rs), which keeps one checkout per `(url,
   revision)` pair under the cache and shells out to `git`. It resolves the
-  revision to a commit and refuses to guess when it cannot.
+  revision to a commit and refuses to guess when it cannot. A `well-known`
+  source goes through [source/well_known](pollen/src/source/well_known.rs),
+  which reads the origin's discovery index, selects skills by name, and
+  downloads each artifact, checks it against the index's digest and unpacks
+  it through [source/archive](pollen/src/source/archive.rs). It hands back
+  the skill directories themselves, so discovery has no part in it.
+- **[http](pollen/src/http.rs)** — the HTTP client of `well-known` sources. It
+  follows redirects itself, so the decision to attach a token is taken again
+  on every hop, and it bounds every body it reads.
+- **[credentials](pollen/src/credentials.rs)** — reads the user-level
+  credentials file and turns an origin into a bearer token: by running the
+  helper command the file names, at most once per run, or by reading the
+  variable it names. It knows nothing about HTTP.
 - **[discovery](pollen/src/discovery.rs)** — walks a materialized source and answers
   which directories a `paths:` entry selects. A directory holding a `SKILL.md`
   is a skill and is never descended into, so a skill that bundles reference
@@ -70,10 +86,11 @@ to a module under [pollen/src/](pollen/src/), except the last.
 - **[version](pollen/src/version.rs)** — which of a remote's tags are releases
   (stable `vX.Y.Z`), which is newest, and which one a revision stands for.
   `outdated` and `autoupdate` read the tags with `git ls-remote`, without
-  fetching. With a minimum release age they also need the date of each
+  fetching, and compare each pinned `well-known` skill with the digest its
+  index publishes. With a minimum release age they also need the date of each
   release they would move to, so they fetch those tags one commit deep.
-  `autoupdate` rewrites the `revision:` lines in place rather than
-  re-serialising the YAML, so comments and layout survive.
+  `autoupdate` rewrites the `revision:` and `digest:` lines in place rather
+  than re-serialising the YAML, so comments and layout survive.
 - **[command](pollen/src/command.rs)** — the subcommands. `show` checks one source
   out without any config and lists what it holds, invalid skills included.
   `validate` has two depths: the config file alone, which touches no network
@@ -100,8 +117,10 @@ to a module under [pollen/src/](pollen/src/), except the last.
 **An update.** The config is parsed and validated up front, so a typo never
 half-applies. Each `repos:` entry is then materialized in order; a git source
 fetches its revision, falling back from a single-revision shallow fetch to a
-full one, and resolves it to a commit. Discovery lists the candidate
-directories, `skill` validates each, and the results accumulate into a plan
+full one, and resolves it to a commit; a `well-known` source fetches its
+index, and downloads the artifacts of the skills it selects that the cache
+does not hold yet. Discovery lists the candidate directories of a git or
+`local` source, `skill` validates each, and the results accumulate into a plan
 keyed by skill name — two sources providing one name is an error, not a
 last-one-wins.
 
@@ -125,15 +144,18 @@ which the next run sweeps.
 
 Two stores, both disposable.
 
-- **The git cache**, at `$POLLEN_CACHE_DIR` (`<user cache>/pollen` by default), one
-  checkout per `(url, revision)`. Keying on the revision as well as the URL is
+- **The cache**, at `$POLLEN_CACHE_DIR` (`<user cache>/pollen` by default), one
+  git checkout per `(url, revision)`. Keying on the revision as well as the URL is
   what lets one config pin two revisions of the same repository without the
   two checkouts fighting. A minimum release age adds one bare repository per
-  remote, holding the release tags whose dates were read. Deleting the cache
-  costs a refetch and nothing else.
+  remote, holding the release tags whose dates were read. Under
+  `well-known/`, the last index read from each origin, which `--offline`
+  works from, and each unpacked artifact, keyed by its digest, which is what
+  lets an unchanged skill skip the download. Deleting the cache costs a
+  refetch and nothing else.
 - **The state file**, `.pollen.json` inside each target directory, mapping
-  each installed skill name to its source, revision, resolved commit and tree
-  fingerprint, and naming the config file that owns the directory. It lives
+  each installed skill name to its source, revision, resolved commit or
+  artifact digest, and tree fingerprint, and naming the config file that owns the directory. It lives
   with what it describes rather than next to the config,
   because the config is shared and version-controlled while what is on disk is
   a property of this machine. Deleting it makes `pollen` forget it owns
@@ -172,6 +194,33 @@ contents of a home directory cannot be reasoned about or reproduced in CI.
 installed, a tool either refuses to remove anything (leaving orphans forever)
 or removes whatever is not declared (eating hand-written skills). The state
 file is what makes pruning safe.
+
+**A digest is the pin of a `well-known` skill.** An index has no revisions: it
+lists the current artifact of each skill and its SHA-256. Pinning that digest
+is content-addressed, so a run deploys exactly those bytes or fails, and
+`outdated`, `autoupdate` and `validate --pinned` treat it as they treat a
+commit. It guarantees integrity, not retrievability: once the publisher
+replaces a skill, a pinned config fails until the pin moves, and another
+machine can reproduce it only while those bytes are still served. The index
+records no dates either, so `--min-release-age` holds back every changed
+digest rather than guess an age. See
+[ADR 0002](docs/adr/0002-fetch-skills-from-well-known-discovery-indexes.md).
+
+**Credentials live outside the project.** `pollen.yaml` is shared and
+version-controlled, so a token or a command in it would let a cloned
+repository make pollen run code or send a secret anywhere. The credentials
+file is the user's, at `<user config>/pollen/credentials.yaml`
+(`--credentials-file` to override), and the project config only names the
+origin. A helper command keeps sign-in, token caching and refresh in a tool
+built for them, the way git credential helpers and `kubectl` exec plugins do,
+so pollen depends on no identity provider. Its standard input and error stay
+on the terminal, for a browser or device-code sign-in.
+
+**TLS from the platform where the build allows it.** On Linux and macOS,
+rustls with the operating system's trust store, so a corporate CA works
+without configuration; on Windows, SChannel, because rustls' crypto provider
+compiles C that does not build for MSVC from another host. Proxies come from
+`HTTPS_PROXY` and friends, not from git's configuration.
 
 **Environment variables carry a `POLLEN_` prefix.** The usual rule is that
 a process owns its environment and takes bare names, and it does not hold for
@@ -240,6 +289,14 @@ digest. A second file would only repeat the config, and could disagree with it.
   keys refuse the target before installing, pruning or sweeping staging material.
 - An install becomes visible in one rename. There is no window in which the
   target holds a partially written skill.
+- A `well-known` artifact is used only once its SHA-256 matches the index,
+  and a pinned skill only when the index publishes its pinned digest.
+- An archive unpacks inside its skill directory or not at all: an absolute
+  path, a `..` component, a link leaving the directory, an entry that is not
+  a file, directory or link, or more than 256 MiB unpacked refuses it.
+- A token is sent to the exact origin, scheme, host and port, that the
+  credentials file names, and to no other, across redirects included.
+  pollen never writes it to disk or to a log.
 - A revision resolves to a commit or the run fails. `FETCH_HEAD` is only
   trusted after a fetch of that exact revision, because after a full fetch it
   names the remote's default branch and would turn a mistyped tag into a
@@ -258,11 +315,19 @@ digest. A second file would only repeat the config, and could disagree with it.
 - Skills are copied, not symlinked, so editing a deployed skill does not edit
   its source, and the next `update` overwrites the edit.
 - A source is fetched over the network on every `update` unless `--offline`
-  is passed.
+  is passed; for a `well-known` source that means its index, while an
+  artifact already in the cache is not downloaded again.
 - A release's age is the date on its tag, which whoever makes the tag sets.
   A backdated tag passes `--min-release-age`.
 - Only regular files and directories are copied; a symlink inside a skill is
-  skipped with a warning.
+  skipped with a warning, and so is a link inside a `well-known` archive.
+- A `well-known` archive keeps file modes only when it records them; a
+  publisher that repacks a skill without them deploys its scripts without
+  the executable bit.
+- pollen reads the v0.2.0 discovery index only, and refuses another
+  `$schema`, an index without one (v0.1.0) included.
+- A credential helper runs once per run, and a refused token fails the run:
+  pollen neither retries nor refreshes.
 - The Python API is synchronous: a call blocks its thread until the command
   finishes. There is no `asyncio` variant.
 - The Python package depends on `git` on `PATH` like the CLI, and installing

@@ -367,6 +367,7 @@ fn install(
             repo: planned.repo.clone(),
             revision: planned.revision.clone(),
             commit: planned.commit.clone(),
+            digest: planned.digest.clone(),
             source_path: planned.source_path.clone(),
             checksum: planned.checksum.clone(),
         },
@@ -396,13 +397,14 @@ mod tests {
             targets: None,
             repos: (0..repo_count)
                 .map(|index| RepoSpec {
-                    repo: format!("https://example.invalid/{index}.git"),
+                    repo: Some(format!("https://example.invalid/{index}.git")),
                     revision: Some("1.0.0".to_owned()),
                     paths: vec![PathSpec {
                         path: PathBuf::from("skills"),
                         recurse: false,
                         exclude: None,
                     }],
+                    ..RepoSpec::default()
                 })
                 .collect(),
             base_dir: PathBuf::new(),
@@ -417,6 +419,7 @@ mod tests {
             let materialized = Materialized {
                 root: root.clone(),
                 resolved: Some("c0ffee".to_owned()),
+                skills: Vec::new(),
             };
             Box::pin(async move { Ok(materialized) })
         });

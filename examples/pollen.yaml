@@ -33,3 +33,17 @@ repos:
   - repo: local
     paths:
       - path: skills
+
+  # An origin serving /.well-known/agent-skills/index.json: every skill it
+  # lists, except the ones whose name matches `exclude`.
+  - well-known: https://skills.example.org
+    exclude: ^experimental-  # default: none
+
+  # The same kind of source, taking only the listed skills. A `digest` pins
+  # the artifact; `pollen autoupdate --freeze` writes it. Tokens for an origin
+  # go in ~/.config/pollen/credentials.yaml, never here.
+  - well-known: https://gateway.example.com
+    skills:
+      - name: pdf-summarizer
+        digest: sha256:3f2a9c0d5b8e7f41a6c2d9e0b1f3a4c5d6e7f8091a2b3c4d5e6f708192a3b4c5
+      - name: code-review  # no digest: follows what the index publishes

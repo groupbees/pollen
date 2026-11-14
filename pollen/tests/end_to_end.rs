@@ -7,7 +7,20 @@ use std::process::Command;
 use pollen::command::update::{Action, Report, update};
 use pollen::config::Config;
 use pollen::source::Fetcher;
+use pollen::source::well_known::CredentialsFile;
 use pollen::state::State;
+
+fn fetcher_for(config: &Config, cache: &Path, offline: bool) -> Fetcher {
+    Fetcher::new(
+        config.base_dir.clone(),
+        cache.to_path_buf(),
+        offline,
+        CredentialsFile {
+            path: cache.join("credentials.yaml"),
+            required: false,
+        },
+    )
+}
 
 #[tokio::test]
 async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
@@ -49,7 +62,7 @@ async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
 
     let config = Config::load(&config_path).unwrap();
     let target = workspace.path().join("deployed");
-    let fetcher = Fetcher::new(config.base_dir.clone(), cache.path().to_path_buf(), false);
+    let fetcher = fetcher_for(&config, cache.path(), false);
 
     let report = update(
         &config,
@@ -81,7 +94,7 @@ async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
     assert_eq!(state.skills["from-git"].commit.as_ref().unwrap().len(), 40);
     assert_eq!(state.skills["from-local"].repo, "local");
 
-    let offline = Fetcher::new(config.base_dir.clone(), cache.path().to_path_buf(), true);
+    let offline = fetcher_for(&config, cache.path(), true);
     let second: Report = update(
         &config,
         std::slice::from_ref(&target),
@@ -119,7 +132,7 @@ async fn a_moved_tag_reinstalls_the_skill() {
 
     let config = Config::load(&config_path).unwrap();
     let target = workspace.path().join("deployed");
-    let fetcher = Fetcher::new(config.base_dir.clone(), cache.path().to_path_buf(), false);
+    let fetcher = fetcher_for(&config, cache.path(), false);
 
     update(
         &config,
@@ -330,7 +343,10 @@ async fn pinned_validation_requires_a_commit_on_every_git_source() {
         .await
         .unwrap_err()
         .to_string();
-    assert!(error.contains("not pinned to a commit"), "{error}");
+    assert!(
+        error.contains("not pinned: https://example.invalid/x.git@v0.1.0"),
+        "{error}"
+    );
 }
 
 /// Commit and tag `tag` in `root`, dated `days_ago` days back.
@@ -417,4 +433,167 @@ async fn autoupdate_passes_over_a_release_younger_than_the_minimum_age() {
 
     let written = std::fs::read_to_string(&config).unwrap();
     assert!(written.contains("revision: v1.1.0\n"), "{written}");
+}
+
+mod well_known {
+    use std::path::{Path, PathBuf};
+
+    use pollen::cli::Options;
+    use pollen::command::{autoupdate, outdated, update, validate};
+    use sha2::{Digest, Sha256};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const SCHEMA: &str = "https://schemas.agentskills.io/discovery/0.2.0/schema.json";
+
+    fn skill_md(name: &str, description: &str) -> String {
+        format!("---\nname: {name}\ndescription: {description}\n---\n")
+    }
+
+    fn digest(body: &str) -> String {
+        format!("sha256:{}", hex::encode(Sha256::digest(body.as_bytes())))
+    }
+
+    /// Serve an index listing each `(name, SKILL.md)` as a `skill-md` entry.
+    async fn publish(server: &MockServer, skills: &[(&str, &str)]) {
+        server.reset().await;
+        let entries: Vec<_> = skills
+            .iter()
+            .map(|(name, body)| {
+                serde_json::json!({
+                    "name": name,
+                    "type": "skill-md",
+                    "description": "d",
+                    "url": format!("{name}/SKILL.md"),
+                    "digest": digest(body),
+                })
+            })
+            .collect();
+        Mock::given(method("GET"))
+            .and(path("/.well-known/agent-skills/index.json"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"$schema": SCHEMA, "skills": entries})),
+            )
+            .mount(server)
+            .await;
+        for (name, body) in skills {
+            Mock::given(method("GET"))
+                .and(path(format!("/.well-known/agent-skills/{name}/SKILL.md")))
+                .respond_with(ResponseTemplate::new(200).set_body_string(*body))
+                .mount(server)
+                .await;
+        }
+    }
+
+    fn options(config: &Path, cache: &Path, credentials: PathBuf) -> Options {
+        Options {
+            config: config.to_owned(),
+            cache_dir: Some(cache.to_owned()),
+            credentials_file: Some(credentials),
+            ..Options::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn deploys_freezes_detects_and_moves_a_pinned_skill() {
+        let server = MockServer::start().await;
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let first = skill_md("alpha", "first");
+        publish(
+            &server,
+            &[("alpha", &first), ("beta", &skill_md("beta", "b"))],
+        )
+        .await;
+        let credentials = workspace.path().join("credentials.yaml");
+        std::fs::write(&credentials, "credentials: []\n").unwrap();
+        let config = workspace.path().join("pollen.yaml");
+        std::fs::write(
+            &config,
+            format!(
+                "repos:\n  - well-known: {}\n    skills:\n      - name: alpha\n",
+                server.uri()
+            ),
+        )
+        .unwrap();
+        let mut options = options(&config, cache.path(), credentials);
+        options.targets = vec![workspace.path().join("deployed")];
+
+        let report = update::report(&options, false, false).await.unwrap();
+        assert_eq!(report.count(update::Action::Added), 1);
+        let state = pollen::state::State::load(&workspace.path().join("deployed")).unwrap();
+        assert_eq!(state.skills["alpha"].digest, Some(digest(&first)));
+        assert_eq!(state.skills["alpha"].repo, server.uri());
+
+        assert!(
+            validate::check(&options, &config, true, true)
+                .await
+                .is_err()
+        );
+        let frozen = autoupdate::apply(&options, true, false, None)
+            .await
+            .unwrap();
+        assert_eq!(frozen.digests.len(), 1);
+        let text = std::fs::read_to_string(&config).unwrap();
+        assert!(
+            text.contains(&format!(
+                "      - name: alpha\n        digest: {}\n",
+                digest(&first)
+            )),
+            "{text}"
+        );
+        validate::check(&options, &config, true, true)
+            .await
+            .unwrap();
+
+        let second = skill_md("alpha", "second");
+        publish(&server, &[("alpha", &second)]).await;
+        let error = format!(
+            "{:#}",
+            update::report(&options, false, false).await.unwrap_err()
+        );
+        assert!(error.contains("pinned to"), "{error}");
+        let statuses = outdated::statuses(&options, None).await.unwrap();
+        assert!(statuses[0].is_outdated(), "{}", statuses[0]);
+
+        autoupdate::apply(&options, false, false, None)
+            .await
+            .unwrap();
+        let report = update::report(&options, false, false).await.unwrap();
+        assert_eq!(report.count(update::Action::Updated), 1);
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("deployed/alpha/SKILL.md")).unwrap(),
+            second
+        );
+    }
+
+    #[tokio::test]
+    async fn a_minimum_release_age_holds_back_every_changed_digest() {
+        let server = MockServer::start().await;
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        publish(&server, &[("alpha", &skill_md("alpha", "new"))]).await;
+        let credentials = workspace.path().join("credentials.yaml");
+        std::fs::write(&credentials, "credentials: []\n").unwrap();
+        let config = workspace.path().join("pollen.yaml");
+        let old = digest("old");
+        std::fs::write(
+            &config,
+            format!(
+                "repos:\n  - well-known: {}\n    skills:\n      - name: alpha\n        digest: {old}\n",
+                server.uri()
+            ),
+        )
+        .unwrap();
+        let options = options(&config, cache.path(), credentials);
+        let week = Some(std::time::Duration::from_secs(7 * 24 * 60 * 60));
+
+        let outcome = autoupdate::apply(&options, false, false, week)
+            .await
+            .unwrap();
+
+        assert!(outcome.digests.is_empty());
+        assert!(std::fs::read_to_string(&config).unwrap().contains(&old));
+    }
 }

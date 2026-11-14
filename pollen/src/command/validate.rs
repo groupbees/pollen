@@ -74,7 +74,8 @@ pub async fn run(
 /// # Errors
 ///
 /// When the file is invalid, `pinned` is set and a git source is not pinned
-/// to a commit, or a source cannot be fetched.
+/// to a commit or a `well-known` one does not list every skill with its
+/// digest, or a source cannot be fetched.
 pub async fn check(
     options: &Options,
     path: &Path,
@@ -92,7 +93,7 @@ pub async fn check(
                 .collect::<Vec<_>>()
                 .join(", ");
             bail!(
-                "{}: {} source(s) not pinned to a commit: {list}. Pin each `revision` to a full commit SHA; keep the tag in a comment: `revision: <sha>  # v1.2.3`",
+                "{}: {} source(s) not pinned: {list}. Pin each git `revision` to a full commit SHA, keeping the tag in a comment (`revision: <sha>  # v1.2.3`), and list each skill of a `well-known` source with its `digest`; `pollen autoupdate --freeze` writes both",
                 path.display(),
                 loose.len()
             );

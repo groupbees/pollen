@@ -49,32 +49,86 @@ pub struct Config {
     pub file: PathBuf,
 }
 
-/// One source of skills: a git repository, or the config file's own directory.
-#[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema)]
+/// One source of skills: a git repository, the config file's own directory,
+/// or an origin publishing an Agent Skills discovery index.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, Validate, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[validate(schema(function = check_revision_matches_repo, skip_on_field_errors = true))]
-#[schemars(extend(
-    "if" = serde_json::json!({"properties": {"repo": {"const": LOCAL_REPO}}, "required": ["repo"]}),
-    "then" = serde_json::json!({"properties": {"revision": false}}),
-    "else" = serde_json::json!({
-        "required": ["revision"],
-        "properties": {"revision": {"type": "string", "minLength": 1}}
-    }),
-))]
+#[validate(schema(function = check_source_keys, skip_on_field_errors = true))]
+#[schemars(extend("oneOf" = serde_json::json!([
+    {
+        "required": ["repo", "paths"],
+        "properties": {"well-known": false, "exclude": false, "skills": false},
+        "if": {"properties": {"repo": {"const": LOCAL_REPO}}},
+        "then": {"properties": {"revision": false}},
+        "else": {
+            "required": ["revision"],
+            "properties": {"revision": {"type": "string", "minLength": 1}}
+        }
+    },
+    {
+        "required": ["well-known"],
+        "properties": {"repo": false, "revision": false, "paths": false},
+        "not": {"required": ["exclude", "skills"]}
+    }
+])))]
 pub struct RepoSpec {
     /// A git URL, a path to a git repository, or `local` for the directory
     /// holding this config file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(length(min = 1, message = "must not be empty"))]
-    #[schemars(length(min = 1))]
-    pub repo: String,
+    #[schemars(with = "String", length(min = 1))]
+    pub repo: Option<String>,
+    /// An `https://` origin serving `/.well-known/agent-skills/index.json`,
+    /// whose skills are downloaded and checked against the index's digests.
+    #[serde(
+        rename = "well-known",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[validate(custom(function = check_origin))]
+    #[schemars(with = "String", extend("format" = "uri"))]
+    pub well_known: Option<String>,
     /// The git revision to check out: a tag, a branch or a commit.
     ///
-    /// Required for a git source, and forbidden on `local`.
+    /// Required for a git source, and forbidden on `local` and `well-known`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
-    /// Where to look for skills inside the source.
-    #[validate(length(min = 1, message = "at least one path is required"), nested)]
+    /// Where to look for skills inside a git or `local` source.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[validate(nested)]
     #[schemars(length(min = 1))]
     pub paths: Vec<PathSpec>,
+    /// Regular expression rejecting the skills of a `well-known` index whose
+    /// name matches. Only with every skill of the index, not with `skills`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(function = check_regex))]
+    #[schemars(extend("format" = "regex"))]
+    pub exclude: Option<String>,
+    /// The skills to take from a `well-known` index, instead of all of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(length(min = 1, message = "at least one skill is required"), nested)]
+    #[schemars(length(min = 1))]
+    pub skills: Option<Vec<SkillPin>>,
+}
+
+/// One skill taken from a `well-known` index.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Validate, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SkillPin {
+    /// The skill's name in the index.
+    #[validate(custom(function = crate::skill::validate_name))]
+    #[schemars(
+        regex(pattern = r"^[a-z0-9]+(-[a-z0-9]+)*$"),
+        length(min = 1, max = 64)
+    )]
+    pub name: String,
+    /// The SHA-256 of the artifact to deploy, as the index writes it:
+    /// `sha256:` and 64 lowercase hex digits. A run fails rather than deploy
+    /// anything else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(function = check_digest))]
+    #[schemars(regex(pattern = r"^sha256:[0-9a-f]{64}$"))]
+    pub digest: Option<String>,
 }
 
 /// One place to look for skills inside a source.
@@ -107,6 +161,11 @@ pub enum Source {
         url: String,
         /// The tag, branch or commit to check out.
         revision: String,
+    },
+    /// An origin publishing an Agent Skills discovery index.
+    WellKnown {
+        /// The origin, `scheme://host[:port]`, without a trailing slash.
+        origin: String,
     },
 }
 
@@ -143,13 +202,19 @@ impl Config {
         Ok(config)
     }
 
-    /// The git sources whose `revision` is not a full commit id.
+    /// The git sources whose `revision` is not a full commit id, and the
+    /// `well-known` sources not listing every skill with its `digest`.
     #[must_use]
     pub fn unpinned(&self) -> Vec<&RepoSpec> {
         self.repos
             .iter()
-            .filter(|repo| {
-                matches!(repo.source(), Source::Git { revision, .. } if !is_commit_id(&revision))
+            .filter(|repo| match repo.source() {
+                Source::Local => false,
+                Source::Git { revision, .. } => !is_commit_id(&revision),
+                Source::WellKnown { .. } => repo
+                    .skills
+                    .as_ref()
+                    .is_none_or(|skills| skills.iter().any(|skill| skill.digest.is_none())),
             })
             .collect()
     }
@@ -181,24 +246,65 @@ impl RepoSpec {
     /// Where this entry's files come from.
     #[must_use]
     pub fn source(&self) -> Source {
-        if self.repo == LOCAL_REPO {
-            Source::Local
-        } else {
-            Source::Git {
-                url: self.repo.clone(),
+        if let Some(origin) = &self.well_known {
+            return Source::WellKnown {
+                origin: normalize_origin(origin).unwrap_or_else(|| origin.clone()),
+            };
+        }
+        match self.repo.as_deref() {
+            Some(LOCAL_REPO) => Source::Local,
+            repo => Source::Git {
+                url: repo.unwrap_or_default().to_owned(),
                 revision: self.revision.clone().unwrap_or_default(),
-            }
+            },
         }
     }
 
-    /// How this entry is named in output and in the state file.
+    /// The `repo:` value, or the origin of a `well-known` source: what the
+    /// state file records as the skill's repo.
+    #[must_use]
+    pub fn location(&self) -> String {
+        match self.source() {
+            Source::Local => LOCAL_REPO.to_owned(),
+            Source::Git { url, .. } => url,
+            Source::WellKnown { origin } => origin,
+        }
+    }
+
+    /// How this entry is named in output.
     #[must_use]
     pub fn label(&self) -> String {
         match self.source() {
             Source::Local => LOCAL_REPO.to_owned(),
             Source::Git { url, revision } => format!("{url}@{revision}"),
+            Source::WellKnown { origin } => origin,
         }
     }
+
+    /// The compiled `exclude` pattern of a `well-known` source.
+    ///
+    /// # Errors
+    ///
+    /// When the pattern is not a valid regular expression, which validation
+    /// already rules out for a config read by [`Config::load`].
+    pub fn exclude_regex(&self) -> Result<Option<Regex>> {
+        compile(self.exclude.as_deref())
+    }
+}
+
+/// `text` as an origin, `scheme://host[:port]`, when it is an `http` or
+/// `https` URL with nothing after the authority but an optional `/`.
+#[must_use]
+pub fn normalize_origin(text: &str) -> Option<String> {
+    let url = reqwest::Url::parse(text).ok()?;
+    let bare = matches!(url.scheme(), "http" | "https")
+        && url.has_host()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none();
+    bare.then(|| url.origin().ascii_serialization())
 }
 
 impl PathSpec {
@@ -211,14 +317,29 @@ impl PathSpec {
     ///
     /// When the pattern is not a valid regular expression.
     pub fn exclude_regex(&self) -> Result<Option<Regex>> {
-        self.exclude
-            .as_deref()
-            .map(|pattern| {
-                Regex::new(pattern)
-                    .with_context(|| format!("`{pattern}` is not a valid regular expression"))
-            })
-            .transpose()
+        compile(self.exclude.as_deref())
     }
+}
+
+fn compile(pattern: Option<&str>) -> Result<Option<Regex>> {
+    pattern
+        .map(|pattern| {
+            Regex::new(pattern)
+                .with_context(|| format!("`{pattern}` is not a valid regular expression"))
+        })
+        .transpose()
+}
+
+/// Whether `digest` is written as an index writes it: `sha256:` and 64
+/// lowercase hex digits.
+#[must_use]
+pub fn is_digest(digest: &str) -> bool {
+    digest.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
 }
 
 /// Whether `revision` is a full commit id — SHA-1 or SHA-256 — which no push
@@ -270,8 +391,102 @@ pub fn expand_home(path: &Path) -> PathBuf {
     dirs::home_dir().map_or_else(|| path.to_path_buf(), |home| home.join(rest))
 }
 
+/// The user-level credentials file: `pollen/credentials.yaml` in the user's
+/// configuration directory, beside the `--global` config.
+#[must_use]
+pub fn default_credentials_path() -> PathBuf {
+    user_config_dir(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        dirs::home_dir(),
+        dirs::config_dir(),
+    )
+    .join("pollen")
+    .join("credentials.yaml")
+}
+
+fn check_source_keys(repo: &RepoSpec) -> Result<(), ValidationError> {
+    match (&repo.repo, &repo.well_known) {
+        (Some(_), Some(_)) => Err(named_error(
+            "repo",
+            "an entry takes either `repo` or `well-known`, not both",
+        )),
+        (None, None) => Err(named_error(
+            "repo",
+            "an entry needs `repo` (a git repository or `local`) or `well-known` (an origin)",
+        )),
+        (Some(_), None) => check_repo_keys(repo),
+        (None, Some(_)) => check_well_known_keys(repo),
+    }
+}
+
+fn check_well_known_keys(repo: &RepoSpec) -> Result<(), ValidationError> {
+    if repo.revision.is_some() {
+        return Err(named_error(
+            "revision",
+            "a `well-known` source takes no revision; pin each skill with a `digest` under `skills`",
+        ));
+    }
+    if !repo.paths.is_empty() {
+        return Err(named_error(
+            "paths",
+            "a `well-known` source takes no paths; select skills by name under `skills`, or leave some out with `exclude`",
+        ));
+    }
+    if repo.exclude.is_some() && repo.skills.is_some() {
+        return Err(named_error(
+            "exclude",
+            "`exclude` filters every skill of the index, so it does not combine with a `skills` list",
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    if let Some(duplicate) = repo
+        .skills
+        .iter()
+        .flatten()
+        .find(|skill| !seen.insert(&skill.name))
+    {
+        let mut error = named_error("skills", "a skill is listed twice");
+        error.add_param("name".into(), &duplicate.name);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn check_repo_keys(repo: &RepoSpec) -> Result<(), ValidationError> {
+    if repo.exclude.is_some() || repo.skills.is_some() {
+        return Err(named_error(
+            "skills",
+            "`skills` and a top-level `exclude` belong to a `well-known` source; a `repo` selects skills under `paths`",
+        ));
+    }
+    if repo.paths.is_empty() {
+        return Err(named_error("paths", "at least one path is required"));
+    }
+    check_revision_matches_repo(repo)
+}
+
+fn check_origin(origin: &str) -> Result<(), ValidationError> {
+    normalize_origin(origin).map(|_| ()).ok_or_else(|| {
+        named_error(
+            "well-known",
+            "must be an origin, such as `https://skills.example.com`, with no path, query or credentials",
+        )
+    })
+}
+
+fn check_digest(digest: &str) -> Result<(), ValidationError> {
+    if is_digest(digest) {
+        Ok(())
+    } else {
+        Err(named_error(
+            "digest",
+            "must be `sha256:` followed by 64 lowercase hex digits",
+        ))
+    }
+}
+
 fn check_revision_matches_repo(repo: &RepoSpec) -> Result<(), ValidationError> {
-    let is_local = repo.repo == LOCAL_REPO;
+    let is_local = repo.repo.as_deref() == Some(LOCAL_REPO);
     let has_revision = repo.revision.as_ref().is_some_and(|rev| !rev.is_empty());
 
     if is_local && has_revision {
@@ -561,6 +776,94 @@ mod tests {
         let unpinned: Vec<String> = config.unpinned().iter().map(|repo| repo.label()).collect();
 
         assert_eq!(unpinned, ["https://example.invalid/b.git@v1.0.0"]);
+    }
+
+    const DIGEST: &str = "sha256:3f2a000000000000000000000000000000000000000000000000000000000000";
+
+    #[test]
+    fn parses_a_well_known_source_taking_every_skill_or_a_pinned_list() {
+        let config = parse(&format!(
+            "repos:\n  - well-known: https://Gateway.example.com/\n    exclude: ^experimental-\n  - well-known: https://gateway.example.com:8443\n    skills:\n      - name: pdf-summarizer\n        digest: {DIGEST}\n      - name: other\n"
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.repos[0].source(),
+            Source::WellKnown {
+                origin: "https://gateway.example.com".to_owned()
+            }
+        );
+        assert!(
+            config.repos[0]
+                .exclude_regex()
+                .unwrap()
+                .unwrap()
+                .is_match("experimental-x")
+        );
+        assert_eq!(config.repos[1].label(), "https://gateway.example.com:8443");
+        let skills = config.repos[1].skills.as_ref().unwrap();
+        assert_eq!(skills[0].digest.as_deref(), Some(DIGEST));
+        assert_eq!(skills[1].digest, None);
+    }
+
+    #[test]
+    fn rejects_a_well_known_source_that_is_not_an_origin() {
+        for origin in [
+            "https://x.example/skills",
+            "https://x.example/?a=b",
+            "https://user:pass@x.example",
+            "ftp://x.example",
+            "x.example",
+        ] {
+            let yaml = format!("repos:\n  - well-known: '{origin}'\n");
+            assert!(parse(&yaml).is_err(), "{origin} was accepted");
+        }
+    }
+
+    #[test]
+    fn rejects_keys_that_do_not_belong_to_the_kind_of_source() {
+        for yaml in [
+            "repos:\n  - repo: local\n    well-known: https://x.example\n    paths:\n      - path: .\n",
+            "repos:\n  - paths:\n      - path: .\n",
+            "repos:\n  - well-known: https://x.example\n    revision: v1.0.0\n",
+            "repos:\n  - well-known: https://x.example\n    paths:\n      - path: .\n",
+            "repos:\n  - well-known: https://x.example\n    exclude: ^a\n    skills:\n      - name: b\n",
+            "repos:\n  - well-known: https://x.example\n    skills: []\n",
+            "repos:\n  - repo: local\n    exclude: ^a\n    paths:\n      - path: .\n",
+            "repos:\n  - repo: local\n    skills:\n      - name: a\n    paths:\n      - path: .\n",
+            "repos:\n  - repo: local\n",
+        ] {
+            assert!(parse(yaml).is_err(), "{yaml}");
+        }
+    }
+
+    #[test]
+    fn rejects_an_invalid_pin() {
+        for skill in [
+            "name: Not-Valid",
+            "name: a\n        digest: sha256:ABC",
+            "name: a\n        digest: md5:00",
+            "name: a\n        surprise: true",
+        ] {
+            let yaml = format!(
+                "repos:\n  - well-known: https://x.example\n    skills:\n      - {skill}\n"
+            );
+            assert!(parse(&yaml).is_err(), "{skill}");
+        }
+        let repeated = "repos:\n  - well-known: https://x.example\n    skills:\n      - name: a\n      - name: a\n";
+        assert!(parse(repeated).unwrap_err().to_string().contains("twice"));
+    }
+
+    #[test]
+    fn a_well_known_source_is_pinned_when_it_lists_every_skill_with_a_digest() {
+        let config = parse(&format!(
+            "repos:\n  - well-known: https://all.example\n  - well-known: https://partly.example\n    skills:\n      - name: a\n        digest: {DIGEST}\n      - name: b\n  - well-known: https://pinned.example\n    skills:\n      - name: a\n        digest: {DIGEST}\n"
+        ))
+        .unwrap();
+
+        let unpinned: Vec<String> = config.unpinned().iter().map(|repo| repo.label()).collect();
+
+        assert_eq!(unpinned, ["https://all.example", "https://partly.example"]);
     }
 
     #[test]

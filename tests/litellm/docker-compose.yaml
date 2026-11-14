@@ -1,0 +1,35 @@
+# A LiteLLM proxy publishing the skills under skills/ as an Agent Skills
+# discovery index, for tests/litellm.sh.
+services:
+  postgres:
+    image: postgres:17.7-alpine@sha256:bb377b7239d2774ac8cc76f481596ce96c5a6b5e9d141f6d0a0ee371a6e7c0f2
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    healthcheck:
+      test:
+        - CMD
+        - pg_isready
+        - --username
+        - litellm
+      interval: 2s
+      retries: 30
+
+  litellm:
+    image: ghcr.io/berriai/litellm-database:v1.109.1@sha256:932c54440654f8f8466a85887612d95dcfb04ae2fc01257844332f4bf3b96986
+    command:
+      - --config
+      - /etc/litellm/config.yaml
+      - --port
+      - "4000"
+    environment:
+      DATABASE_URL: postgresql://litellm:litellm@postgres:5432/litellm
+      LITELLM_MASTER_KEY: sk-pollen-test
+    volumes:
+      - ./litellm.yaml:/etc/litellm/config.yaml:ro
+    ports:
+      - 127.0.0.1:${POLLEN_LITELLM_PORT:-4000}:4000
+    depends_on:
+      postgres:
+        condition: service_healthy

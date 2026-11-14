@@ -1,4 +1,5 @@
-//! `pollen autoupdate`: move every git source to its newest release, in place.
+//! `pollen autoupdate`: move every git source to its newest release, and
+//! every pinned `well-known` skill to its published digest, in place.
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -9,8 +10,8 @@ use regex::Regex;
 
 use crate::cli::Options;
 use crate::command::Context;
-use crate::command::outdated::{self, Status};
-use crate::config::{Config, is_commit_id};
+use crate::command::outdated::{self, DigestStatus, Entry, Status};
+use crate::config::{Config, Source, is_commit_id, normalize_origin};
 use crate::version::Version;
 
 /// One `revision:` to rewrite.
@@ -27,13 +28,28 @@ pub struct Bump {
     pub release: Option<String>,
 }
 
+/// One `digest:` of a skill listed under a `well-known` source to write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DigestBump {
+    /// The origin of the entry.
+    pub origin: String,
+    /// The skill's name.
+    pub skill: String,
+    /// The `digest:` it holds now, `None` when it has none.
+    pub from: Option<String>,
+    /// The digest the index publishes.
+    pub to: String,
+}
+
 /// What an autoupdate changed, or would change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome {
     /// The config file.
     pub path: PathBuf,
-    /// One entry per source moved, empty when every source is up to date.
+    /// One entry per git source moved, empty when every one is up to date.
     pub bumps: Vec<Bump>,
+    /// One entry per `well-known` skill whose digest changes.
+    pub digests: Vec<DigestBump>,
     /// Whether the file was rewritten: false on a dry run or with no bump.
     pub written: bool,
 }
@@ -53,15 +69,31 @@ pub async fn run(
     let outcome = apply(options, freeze, dry_run, min_age).await?;
     let path = outcome.path.display();
 
-    if outcome.bumps.is_empty() {
+    if outcome.bumps.is_empty() && outcome.digests.is_empty() {
         println!("{path}: every source is up to date");
         return Ok(());
     }
     for bump in &outcome.bumps {
         println!("{}  {} -> {}", bump.repo, bump.from, written(bump));
     }
+    for bump in &outcome.digests {
+        println!(
+            "{} {}  {} -> {}",
+            bump.origin,
+            bump.skill,
+            bump.from.as_deref().unwrap_or("(none)"),
+            bump.to
+        );
+    }
     if outcome.written {
-        println!("{path}: {} source(s) updated", outcome.bumps.len());
+        let mut counts = Vec::new();
+        if !outcome.bumps.is_empty() {
+            counts.push(format!("{} source(s)", outcome.bumps.len()));
+        }
+        if !outcome.digests.is_empty() {
+            counts.push(format!("{} skill digest(s)", outcome.digests.len()));
+        }
+        println!("{path}: {} updated", counts.join(" and "));
     } else {
         println!("{path}: not written (dry run)");
     }
@@ -69,7 +101,12 @@ pub async fn run(
 }
 
 /// Move every git source of the config `options` name to its newest release
-/// at least `min_age` old, rewriting the file unless `dry_run`.
+/// at least `min_age` old, and every pinned `well-known` skill to the digest
+/// its index publishes, rewriting the file unless `dry_run`.
+///
+/// With `freeze`, git tags become the commits they point to, and the skills
+/// listed without a `digest` get the published one. A `well-known` entry
+/// that lists no skills has nothing to pin and is left as it is.
 ///
 /// # Errors
 ///
@@ -82,24 +119,84 @@ pub async fn apply(
     min_age: Option<Duration>,
 ) -> Result<Outcome> {
     if options.offline {
-        bail!("`autoupdate` asks every remote for its tags; drop --offline");
+        bail!(
+            "`autoupdate` asks every remote for its tags and every origin for its index; drop --offline"
+        );
     }
     let path = options.config_path();
     let context = Context::open(options)?;
-    let statuses = outdated::check(&context.config, &options.cache_dir(), min_age).await?;
-    let bumps = plan(&statuses, freeze);
+    if freeze {
+        for repo in &context.config.repos {
+            if let Source::WellKnown { origin } = repo.source()
+                && repo.skills.is_none()
+            {
+                tracing::warn!(
+                    "{origin}: takes every skill of its index, so there is no digest to pin; list the skills under `skills` to pin them"
+                );
+            }
+        }
+    }
+    let entries = outdated::check(
+        &context.config,
+        &options.cache_dir(),
+        options.credentials_file(),
+        min_age,
+    )
+    .await?;
+    let mut releases = Vec::new();
+    let mut skills = Vec::new();
+    for entry in entries {
+        match entry {
+            Entry::Release(status) => releases.push(status),
+            Entry::Digest(status) => skills.push(status),
+        }
+    }
+    let bumps = plan(&releases, freeze);
+    let digests = plan_digests(&skills, freeze);
 
-    let written = !bumps.is_empty() && !dry_run;
+    let written = (!bumps.is_empty() || !digests.is_empty()) && !dry_run;
     if written {
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("cannot read {}", path.display()))?;
-        write_checked(&path, &rewrite(&text, &bumps)?)?;
+        let text = rewrite_digests(&rewrite(&text, &bumps)?, &digests)?;
+        write_checked(&path, &text)?;
     }
     Ok(Outcome {
         path,
         bumps,
+        digests,
         written,
     })
+}
+
+/// What to change: every pinned skill whose index publishes another digest,
+/// and with `freeze` every listed skill without one.
+#[must_use]
+pub fn plan_digests(statuses: &[DigestStatus], freeze: bool) -> Vec<DigestBump> {
+    let mut bumps = Vec::new();
+    for status in statuses {
+        let Some(published) = &status.published else {
+            tracing::warn!(
+                "{}: no longer lists `{}`; left as it is",
+                status.origin,
+                status.skill
+            );
+            continue;
+        };
+        let moves = match &status.pinned {
+            Some(_) => status.is_outdated(),
+            None => freeze,
+        };
+        if moves {
+            bumps.push(DigestBump {
+                origin: status.origin.clone(),
+                skill: status.skill.clone(),
+                from: status.pinned.clone(),
+                to: published.clone(),
+            });
+        }
+    }
+    bumps
 }
 
 /// What to change: every source behind its newest release, and with `freeze`
@@ -154,6 +251,17 @@ static REPO_LINE: LazyLock<Regex> = LazyLock::new(|| {
 static REVISION_LINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^(\s*(?:-\s+)?revision:\s*)["']?([^"'#\s]+)["']?\s*(?:#\s*(.*?))?\s*$"#)
         .expect("valid regex")
+});
+static WELL_KNOWN_LINE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^\s*(?:-\s+)?well-known:\s*["']?([^"'#\s]+)["']?"#).expect("valid regex")
+});
+static SKILLS_LINE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*(?:-\s+)?)skills:\s*(?:#.*)?$").expect("valid regex"));
+static NAME_LINE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^(\s*(?:-\s+)?)name:\s*["']?([^"'#\s]+)["']?"#).expect("valid regex")
+});
+static DIGEST_LINE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^(\s*(?:-\s+)?digest:\s*)["']?[^"'#\s]+["']?(\s*#.*)?$"#).expect("valid regex")
 });
 static ITEM_START: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*)-\s").expect("valid regex"));
@@ -216,16 +324,19 @@ pub fn rewrite(text: &str, bumps: &[Bump]) -> Result<String> {
 
 /// The `[start, end)` line ranges of the items under `repos:`.
 fn entries(lines: &[&str]) -> Vec<(usize, usize)> {
-    let Some(repos) = lines
+    lines
         .iter()
         .position(|line| line.trim_end().starts_with("repos:"))
-    else {
-        return Vec::new();
-    };
+        .map_or_else(Vec::new, |repos| items(lines, repos, lines.len(), 0))
+}
+
+/// The `[start, end)` line ranges of the items of the block list whose key
+/// is on line `header`, at column `key`, looking no further than `limit`.
+fn items(lines: &[&str], header: usize, limit: usize, key: usize) -> Vec<(usize, usize)> {
     let mut item_indent = None;
     let mut starts = Vec::new();
-    let mut end = lines.len();
-    for (index, line) in lines.iter().enumerate().skip(repos + 1) {
+    let mut end = limit;
+    for (index, line) in lines.iter().enumerate().take(limit).skip(header + 1) {
         let trimmed = line.trim_start();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
@@ -233,15 +344,13 @@ fn entries(lines: &[&str]) -> Vec<(usize, usize)> {
         let indent = line.len() - trimmed.len();
         if let Some(caps) = ITEM_START.captures(line) {
             let this = caps[1].len();
-            if item_indent.is_none_or(|known| known == this) {
+            if item_indent.map_or(this >= key, |known| known == this) {
                 item_indent = Some(this);
                 starts.push(index);
                 continue;
             }
         }
-        if item_indent.is_some_and(|known| indent <= known && !trimmed.starts_with('-'))
-            || indent == 0
-        {
+        if item_indent.is_none_or(|known| indent <= known) {
             end = index;
             break;
         }
@@ -251,6 +360,82 @@ fn entries(lines: &[&str]) -> Vec<(usize, usize)> {
         .enumerate()
         .map(|(position, &start)| (start, starts.get(position + 1).copied().unwrap_or(end)))
         .collect()
+}
+
+/// Apply `bumps` to the text of a `pollen.yaml`, line by line, as
+/// [`rewrite`] does: a `digest:` line is replaced, keeping its comment, or
+/// inserted under the skill's `name:` when it has none.
+///
+/// # Errors
+///
+/// When a skill to bump cannot be found, e.g. in YAML flow style.
+pub fn rewrite_digests(text: &str, bumps: &[DigestBump]) -> Result<String> {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
+    let mut applied = vec![false; bumps.len()];
+
+    for (start, end) in entries(&lines) {
+        let origin = lines[start..end].iter().find_map(|line| {
+            WELL_KNOWN_LINE
+                .captures(line)
+                .and_then(|caps| normalize_origin(&caps[1]))
+        });
+        let Some(origin) = origin else { continue };
+        let Some((header, key)) = (start..end).find_map(|index| {
+            SKILLS_LINE
+                .captures(lines[index])
+                .map(|caps| (index, caps[1].len()))
+        }) else {
+            continue;
+        };
+        for (first, last) in items(&lines, header, end, key) {
+            let Some((name_index, name, column)) = (first..last).find_map(|index| {
+                NAME_LINE
+                    .captures(lines[index])
+                    .map(|caps| (index, caps[2].to_owned(), caps[1].len()))
+            }) else {
+                continue;
+            };
+            let Some((which, bump)) = bumps
+                .iter()
+                .enumerate()
+                .find(|(_, bump)| bump.origin == origin && bump.skill == name)
+            else {
+                continue;
+            };
+            let digest = (first..last).find_map(|index| {
+                let body = lines[index].trim_end_matches(['\r', '\n']);
+                DIGEST_LINE
+                    .captures(body)
+                    .map(|caps| (index, body.len(), caps))
+            });
+            if let Some((index, length, caps)) = digest {
+                let line = lines[index];
+                let comment = caps.get(2).map_or("", |comment| comment.as_str());
+                out[index] = format!("{}{}{comment}{}", &caps[1], bump.to, &line[length..]);
+            } else {
+                let line = lines[name_index];
+                let ending = &line[line.trim_end_matches(['\r', '\n']).len()..];
+                let ending = if ending.is_empty() { "\n" } else { ending };
+                out[name_index] = format!(
+                    "{}{ending}{}digest: {}{ending}",
+                    line.trim_end_matches(['\r', '\n']),
+                    " ".repeat(column),
+                    bump.to
+                );
+            }
+            applied[which] = true;
+        }
+    }
+
+    if let Some(missing) = bumps.iter().zip(&applied).find(|(_, done)| !**done) {
+        bail!(
+            "cannot find the skill `{}` of {} to rewrite its digest; edit it by hand",
+            missing.0.skill,
+            missing.0.origin
+        );
+    }
+    Ok(out.concat())
 }
 
 /// Write `text` to `path` only if it still parses as a valid config.
@@ -383,6 +568,123 @@ repos:
         .unwrap();
 
         assert_eq!(out, text.replace("v1.0.0", "v1.1.0"));
+    }
+
+    const OLD: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    const NEW: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+
+    fn digest_bump(skill: &str, from: Option<&str>) -> DigestBump {
+        DigestBump {
+            origin: "https://gateway.example.com".to_owned(),
+            skill: skill.to_owned(),
+            from: from.map(str::to_owned),
+            to: NEW.to_owned(),
+        }
+    }
+
+    const WELL_KNOWN: &str = "\
+repos:
+  - repo: local
+    paths:
+      - path: skills
+  - well-known: https://gateway.example.com/  # the gateway
+    skills:
+      - name: pinned
+        digest: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\"  # keep
+      - name: loose
+      - digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        name: reversed
+";
+
+    #[test]
+    fn replaces_a_digest_and_inserts_a_missing_one() {
+        let out = rewrite_digests(
+            WELL_KNOWN,
+            &[
+                digest_bump("pinned", Some(OLD)),
+                digest_bump("loose", None),
+                digest_bump("reversed", Some(OLD)),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(
+            out,
+            WELL_KNOWN
+                .replace(&format!("\"{OLD}\"  # keep"), &format!("{NEW}  # keep"))
+                .replace(
+                    "      - name: loose\n",
+                    &format!("      - name: loose\n        digest: {NEW}\n")
+                )
+                .replace(
+                    &format!("      - digest: {OLD}"),
+                    &format!("      - digest: {NEW}")
+                )
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pollen.yaml");
+        std::fs::write(&path, &out).unwrap();
+        Config::load(&path).unwrap();
+    }
+
+    #[test]
+    fn inserts_a_digest_with_windows_line_endings() {
+        let text = "repos:\r\n  - well-known: https://gateway.example.com\r\n    skills:\r\n      - name: loose\r\n";
+
+        let out = rewrite_digests(text, &[digest_bump("loose", None)]).unwrap();
+
+        assert_eq!(
+            out,
+            format!(
+                "repos:\r\n  - well-known: https://gateway.example.com\r\n    skills:\r\n      - name: loose\r\n        digest: {NEW}\r\n"
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_a_skill_it_cannot_find() {
+        let error = rewrite_digests(
+            "repos: [{well-known: https://gateway.example.com, skills: [{name: a}]}]\n",
+            &[digest_bump("a", None)],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("edit it by hand"), "{error}");
+    }
+
+    fn digest_status(
+        pinned: Option<&str>,
+        published: Option<&str>,
+        held_back: bool,
+    ) -> DigestStatus {
+        DigestStatus {
+            origin: "https://gateway.example.com".to_owned(),
+            skill: "a".to_owned(),
+            pinned: pinned.map(str::to_owned),
+            published: published.map(str::to_owned),
+            held_back,
+        }
+    }
+
+    #[test]
+    fn plans_a_changed_digest_and_with_freeze_a_missing_one() {
+        let statuses = [
+            digest_status(Some(OLD), Some(NEW), false),
+            digest_status(Some(NEW), Some(NEW), false),
+            digest_status(Some(OLD), Some(NEW), true),
+            digest_status(Some(OLD), None, false),
+            digest_status(None, Some(NEW), false),
+        ];
+
+        assert_eq!(
+            plan_digests(&statuses, false),
+            [digest_bump("a", Some(OLD))]
+        );
+        assert_eq!(
+            plan_digests(&statuses, true),
+            [digest_bump("a", Some(OLD)), digest_bump("a", None)]
+        );
     }
 
     fn status(revision: &str, current: Option<&str>, latest: &str) -> Status {

@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use pollen::cli::Options;
 use pollen::command;
-use pollen::command::outdated::Pending;
+use pollen::command::autoupdate::DigestBump;
+use pollen::command::outdated::{Entry, Pending};
 use pollen::version::RemoteTag;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError};
@@ -37,6 +38,7 @@ fn options(
     targets: Option<Vec<PathBuf>>,
     cache_dir: Option<PathBuf>,
     offline: bool,
+    credentials_file: Option<PathBuf>,
 ) -> PyResult<Options> {
     if global && config.is_some() {
         return Err(PyValueError::new_err(
@@ -50,6 +52,7 @@ fn options(
         targets: targets.unwrap_or_default(),
         cache_dir,
         offline,
+        credentials_file,
     })
 }
 
@@ -90,7 +93,7 @@ async fn interrupted() -> PyErr {
 
 /// Install, refresh and prune the skills the config declares.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, dry_run=false, force=false))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, credentials_file=None, dry_run=false, force=false))]
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn update(
     py: Python<'_>,
@@ -99,10 +102,18 @@ fn update(
     targets: Option<Vec<PathBuf>>,
     cache_dir: Option<PathBuf>,
     offline: bool,
+    credentials_file: Option<PathBuf>,
     dry_run: bool,
     force: bool,
 ) -> PyResult<Bound<'_, PyAny>> {
-    let options = options(config, global_, targets, cache_dir, offline)?;
+    let options = options(
+        config,
+        global_,
+        targets,
+        cache_dir,
+        offline,
+        credentials_file,
+    )?;
     let report = block_on(py, command::update::report(&options, dry_run, force))?;
 
     let summaries = report
@@ -153,7 +164,7 @@ fn list_installed(
     cache_dir: Option<PathBuf>,
     offline: bool,
 ) -> PyResult<Vec<Bound<'_, PyAny>>> {
-    let options = options(config, global_, targets, cache_dir, offline)?;
+    let options = options(config, global_, targets, cache_dir, offline, None)?;
     let deployed = py
         .detach(|| command::list::installed(&options))
         .map_err(|error| PollenError::new_err(format!("{error:#}")))?;
@@ -170,6 +181,7 @@ fn list_installed(
                         repo: &skill.repo,
                         revision: &skill.revision,
                         commit: &skill.commit,
+                        digest: &skill.digest,
                         source_path: &skill.source_path,
                         checksum: &skill.checksum,
                     })
@@ -188,7 +200,7 @@ fn list_installed(
 /// Raises `PollenError` when the config is invalid or a selected skill breaks
 /// the Agent Skills specification.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, config_only=false, pinned=false))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, credentials_file=None, config_only=false, pinned=false))]
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn validate(
     py: Python<'_>,
@@ -197,10 +209,18 @@ fn validate(
     targets: Option<Vec<PathBuf>>,
     cache_dir: Option<PathBuf>,
     offline: bool,
+    credentials_file: Option<PathBuf>,
     config_only: bool,
     pinned: bool,
 ) -> PyResult<Bound<'_, PyAny>> {
-    let options = options(config, global_, targets, cache_dir, offline)?;
+    let options = options(
+        config,
+        global_,
+        targets,
+        cache_dir,
+        offline,
+        credentials_file,
+    )?;
     let path = options.config_path();
     let validation = block_on(
         py,
@@ -226,6 +246,7 @@ fn validate(
                         repo: &skill.repo,
                         revision: &skill.revision,
                         commit: &skill.commit,
+                        digest: &skill.digest,
                         source_path: &skill.source_path,
                     })
                 })
@@ -240,31 +261,41 @@ fn validate(
 }
 
 /// Where each git source stands against its remote's releases, leaving out
-/// those younger than `min_release_age`.
+/// those younger than `min_release_age`, and each skill listed under a
+/// `well-known` source against its index.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, min_release_age=None))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, credentials_file=None, min_release_age=None))]
 fn outdated(
     py: Python<'_>,
     config: Option<PathBuf>,
     global_: bool,
     targets: Option<Vec<PathBuf>>,
     cache_dir: Option<PathBuf>,
+    credentials_file: Option<PathBuf>,
     min_release_age: Option<Duration>,
 ) -> PyResult<Vec<Bound<'_, PyAny>>> {
-    let options = options(config, global_, targets, cache_dir, false)?;
+    let options = options(config, global_, targets, cache_dir, false, credentials_file)?;
     let statuses = block_on(py, command::outdated::statuses(&options, min_release_age))?;
 
     statuses
         .iter()
-        .map(|status| {
-            record!(py, "SourceStatus" {
+        .map(|entry| match entry {
+            Entry::Release(status) => record!(py, "SourceStatus" {
                 repo: &status.repo,
                 revision: &status.revision,
                 current: release(py, status.current.as_ref())?,
                 latest: release(py, status.latest.as_ref())?,
                 pending: pending(py, status.pending.as_ref())?,
                 is_outdated: status.is_outdated(),
-            })
+            }),
+            Entry::Digest(status) => record!(py, "DigestStatus" {
+                origin: &status.origin,
+                skill: &status.skill,
+                pinned: &status.pinned,
+                published: &status.published,
+                held_back: status.held_back,
+                is_outdated: status.is_outdated(),
+            }),
         })
         .collect()
 }
@@ -289,7 +320,7 @@ fn pending<'py>(py: Python<'py>, pending: Option<&Pending>) -> PyResult<Option<B
 /// Move every git source to its newest release at least `min_release_age`
 /// old, rewriting the config file unless `dry_run`.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, freeze=false, dry_run=false, min_release_age=None))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, credentials_file=None, freeze=false, dry_run=false, min_release_age=None))]
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn autoupdate(
     py: Python<'_>,
@@ -297,11 +328,12 @@ fn autoupdate(
     global_: bool,
     targets: Option<Vec<PathBuf>>,
     cache_dir: Option<PathBuf>,
+    credentials_file: Option<PathBuf>,
     freeze: bool,
     dry_run: bool,
     min_release_age: Option<Duration>,
 ) -> PyResult<Bound<'_, PyAny>> {
-    let options = options(config, global_, targets, cache_dir, false)?;
+    let options = options(config, global_, targets, cache_dir, false, credentials_file)?;
     let outcome = block_on(
         py,
         command::autoupdate::apply(&options, freeze, dry_run, min_release_age),
@@ -319,10 +351,25 @@ fn autoupdate(
             })
         })
         .collect::<PyResult<Vec<_>>>()?;
+    let digests = outcome
+        .digests
+        .iter()
+        .map(|bump| digest_bump(py, bump))
+        .collect::<PyResult<Vec<_>>>()?;
     record!(py, "AutoupdateOutcome" {
         path: &outcome.path,
         bumps: bumps,
+        digests: digests,
         written: outcome.written,
+    })
+}
+
+fn digest_bump<'py>(py: Python<'py>, bump: &DigestBump) -> PyResult<Bound<'py, PyAny>> {
+    record!(py, "DigestBump" {
+        origin: &bump.origin,
+        skill: &bump.skill,
+        from_digest: &bump.from,
+        to_digest: &bump.to,
     })
 }
 
@@ -340,7 +387,7 @@ fn show<'py>(
     cache_dir: Option<PathBuf>,
     offline: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let options = options(None, false, None, cache_dir, offline)?;
+    let options = options(None, false, None, cache_dir, offline, None)?;
     let cache_dir = options.cache_dir();
     let listing = block_on(
         py,

@@ -72,6 +72,7 @@ pub async fn checkout(
     Ok(Materialized {
         root: repo_dir,
         resolved: Some(commit),
+        skills: Vec::new(),
     })
 }
 

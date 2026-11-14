@@ -56,6 +56,7 @@ impl Context {
             self.config.base_dir.clone(),
             options.cache_dir(),
             options.offline,
+            options.credentials_file(),
         )
     }
 }
