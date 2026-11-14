@@ -286,6 +286,7 @@ jobs:
         run: |
           brew tap-new --no-git "$CHECK_TAP"
           cp pollen.rb "$(brew --repository "$CHECK_TAP")/Formula/pollen.rb"
+          brew trust --formula "$CHECK_TAP/pollen"
           brew audit --strict --formula "$CHECK_TAP/pollen"
           brew install --formula "$CHECK_TAP/pollen"
           brew test "$CHECK_TAP/pollen"
