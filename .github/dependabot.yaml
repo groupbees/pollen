@@ -25,6 +25,17 @@ updates:
           - patch
           - minor
 
+  # The LiteLLM proxy and its database that tests/litellm.sh runs against.
+  - package-ecosystem: docker-compose
+    directory: /tests/litellm
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+
   - package-ecosystem: uv
     directory: /pollen-py
     schedule:

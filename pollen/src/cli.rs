@@ -90,9 +90,19 @@ pub struct Options {
     #[arg(long, env = "POLLEN_CACHE_DIR", global = true)]
     pub cache_dir: Option<PathBuf>,
 
-    /// Work from the cache only, without contacting any git remote.
+    /// Work from the cache only, without contacting any git remote or
+    /// `well-known` origin.
     #[arg(long, env = "POLLEN_OFFLINE", global = true)]
     pub offline: bool,
+
+    /// File declaring how to obtain a token for each `well-known` origin.
+    ///
+    /// Defaults to `$XDG_CONFIG_HOME/pollen/credentials.yaml`
+    /// (`~/.config/pollen/credentials.yaml` when unset,
+    /// `%APPDATA%\pollen\credentials.yaml` on Windows), which may be absent.
+    /// A file named here must exist.
+    #[arg(long, env = "POLLEN_CREDENTIALS_FILE", global = true)]
+    pub credentials_file: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -103,6 +113,7 @@ impl Default for Options {
             targets: Vec::new(),
             cache_dir: None,
             offline: false,
+            credentials_file: None,
         }
     }
 }
@@ -126,6 +137,22 @@ impl Options {
             &crate::config::GLOBAL_DEFAULT_TARGETS
         } else {
             &crate::config::DEFAULT_TARGETS
+        }
+    }
+
+    /// The credentials file: `--credentials-file` with `~` expanded, which
+    /// must exist, else the default one, which may not.
+    #[must_use]
+    pub fn credentials_file(&self) -> crate::source::well_known::CredentialsFile {
+        match &self.credentials_file {
+            Some(path) => crate::source::well_known::CredentialsFile {
+                path: crate::config::expand_home(path),
+                required: true,
+            },
+            None => crate::source::well_known::CredentialsFile {
+                path: crate::config::default_credentials_path(),
+                required: false,
+            },
         }
     }
 
@@ -169,7 +196,8 @@ pub enum Command {
         #[arg(long, env = "POLLEN_CONFIG_ONLY")]
         config_only: bool,
 
-        /// Also require every git source to be pinned to a full commit SHA.
+        /// Also require every git source to be pinned to a full commit SHA, and
+        /// every `well-known` source to list each skill with its `digest`.
         ///
         /// A tag can be moved and a branch moves on every push; a commit
         /// cannot. Keep the tag readable in a comment:
@@ -181,7 +209,8 @@ pub enum Command {
     /// Print the JSON Schema for `pollen.yaml`.
     Schema,
 
-    /// Show which git sources have a newer release than the one pinned.
+    /// Show which git sources have a newer release than the one pinned, and
+    /// which pinned `well-known` skills a newer digest.
     Outdated {
         /// Leave out releases younger than this: whole days or hours, `7d`
         /// or `12h`. `0d` turns it off.
@@ -198,13 +227,15 @@ pub enum Command {
         min_release_age: Option<Duration>,
     },
 
-    /// Move every git source to its newest release, rewriting `pollen.yaml`.
+    /// Move every git source to its newest release, and every pinned
+    /// `well-known` skill to its published digest, rewriting `pollen.yaml`.
     ///
-    /// Only `revision:` lines change; comments and layout are kept, and the
-    /// file is written only if it still validates.
+    /// Only `revision:` and `digest:` lines change; comments and layout are
+    /// kept, and the file is written only if it still validates.
     Autoupdate {
         /// Pin each source to the commit of its release, with the release in a
-        /// trailing comment: `revision: <sha>  # v1.2.3`.
+        /// trailing comment: `revision: <sha>  # v1.2.3`, and each skill listed
+        /// under a `well-known` source to its published `digest`.
         #[arg(long, env = "POLLEN_FREEZE")]
         freeze: bool,
 

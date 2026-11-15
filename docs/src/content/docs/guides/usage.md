@@ -44,8 +44,11 @@ revision: acad0f52027cf8f8edf7bfa6a55e13c594d8ee71  # v0.1.0
 ```
 
 Whatever the flags, `update` and `validate` warn when a revision is a branch.
+A `well-known` source is pinned by listing each skill with its `digest`; see
+[Well-known sources](/guides/well-known-sources/#pinning).
 
-See which sources have a newer release, from the remotes' tags:
+See which sources have a newer release, from the remotes' tags, and which
+pinned `well-known` skills a newer digest, from their indexes:
 
 ```sh
 pollen outdated

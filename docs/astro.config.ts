@@ -34,7 +34,7 @@ export default defineConfig({
 		starlight({
 			title: "pollen",
 			description:
-				"Deploy Agent Skills from git repositories and local directories, declaratively, from a single pollen.yaml.",
+				"Deploy Agent Skills from git repositories, local directories and well-known indexes, declaratively, from a single pollen.yaml.",
 			logo: { src: "../assets/logo-icon.svg" },
 			favicon: "/favicon.svg",
 			social: [{ icon: "github", label: "GitHub", href: "https://github.com/groupbees/pollen" }],

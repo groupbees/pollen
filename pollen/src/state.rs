@@ -40,6 +40,9 @@ pub struct InstalledSkill {
     pub revision: Option<String>,
     /// The commit that revision resolved to.
     pub commit: Option<String>,
+    /// The digest of the artifact a `well-known` source served.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
     /// Where the skill sits inside its source.
     pub source_path: String,
     /// Fingerprint of the installed tree.
@@ -140,6 +143,7 @@ mod tests {
             repo: "https://github.com/toto/tata".to_owned(),
             revision: Some("1.2.3".to_owned()),
             commit: Some("deadbeef".to_owned()),
+            digest: None,
             source_path: "mydir/demo".to_owned(),
             checksum: "sha256:00".to_owned(),
         }

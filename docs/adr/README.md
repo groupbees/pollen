@@ -7,3 +7,4 @@ system as it stands is described in [ARCHITECTURE.md](../../ARCHITECTURE.md).
 | # | Decision | Status |
 | --- | --- | --- |
 | [0001](0001-ship-python-bindings-built-with-pyo3.md) | Ship Python bindings built with PyO3 | accepted |
+| [0002](0002-fetch-skills-from-well-known-discovery-indexes.md) | Fetch skills from well-known discovery indexes over HTTP | accepted |

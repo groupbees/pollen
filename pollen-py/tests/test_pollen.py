@@ -95,7 +95,7 @@ def test_an_invalid_skill_raises_with_the_problem(workspace: Path, cache_dir: Pa
 
 
 def test_validate_pinned_refuses_a_tag(workspace: Path) -> None:
-    with pytest.raises(pollen.PollenError, match="not pinned to a commit"):
+    with pytest.raises(pollen.PollenError, match="not pinned:"):
         pollen.validate(config_only=True, pinned=True)
 
 
@@ -114,6 +114,7 @@ def test_outdated_reports_a_newer_release(workspace: Path, origin: Path, cache_d
 
     [status] = pollen.outdated(cache_dir=cache_dir)
 
+    assert isinstance(status, pollen.SourceStatus)
     assert status.revision == "v1.0.0"
     assert status.current is not None
     assert status.current.name == "v1.0.0"
@@ -128,6 +129,7 @@ def test_outdated_holds_back_a_release_younger_than_the_minimum_age(
 
     [status] = pollen.outdated(cache_dir=cache_dir, min_release_age=timedelta(days=7))
 
+    assert isinstance(status, pollen.SourceStatus)
     assert status.latest == status.current
     assert status.pending is not None
     assert (status.pending.name, status.pending.commit) == ("v1.1.0", commit)

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pollen-skills"
-description = "Deploy Agent Skills from git repositories and local directories, declaratively"
+description = "Deploy Agent Skills from git repositories, local directories and well-known indexes, declaratively"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"

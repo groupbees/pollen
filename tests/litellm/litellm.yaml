@@ -1,0 +1,3 @@
+model_list: []
+litellm_settings:
+  public_skills_index: true

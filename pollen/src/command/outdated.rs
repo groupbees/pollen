@@ -1,5 +1,5 @@
 //! `pollen outdated`: which git sources have a newer release than the one
-//! they are pinned to.
+//! they are pinned to, and which `well-known` skills a newer artifact.
 
 use std::fmt;
 use std::path::Path;
@@ -9,9 +9,95 @@ use anyhow::{Result, bail};
 
 use crate::cli::Options;
 use crate::command::Context;
-use crate::config::{Config, Source, is_commit_id};
+use crate::config::{Config, RepoSpec, Source, is_commit_id};
 use crate::source::git;
+use crate::source::well_known::{CredentialsFile, WellKnown};
 use crate::version::{self, RemoteTag, Version};
+
+/// Where one source, or one skill of a `well-known` source, stands.
+#[derive(Debug, Clone)]
+pub enum Entry {
+    /// A git source, against its remote's releases.
+    Release(Status),
+    /// A skill listed under a `well-known` source's `skills`, against the
+    /// digest its index publishes.
+    Digest(DigestStatus),
+}
+
+impl Entry {
+    /// Whether a newer release or artifact exists than the one pinned.
+    #[must_use]
+    pub fn is_outdated(&self) -> bool {
+        match self {
+            Self::Release(status) => status.is_outdated(),
+            Self::Digest(status) => status.is_outdated(),
+        }
+    }
+}
+
+impl fmt::Display for Entry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Release(status) => status.fmt(formatter),
+            Self::Digest(status) => status.fmt(formatter),
+        }
+    }
+}
+
+/// Where one skill listed under a `well-known` source stands against the
+/// digest its index publishes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DigestStatus {
+    /// The origin of the source.
+    pub origin: String,
+    /// The skill's name.
+    pub skill: String,
+    /// The `digest:` pinned in the config, `None` when the skill follows
+    /// whatever the index publishes.
+    pub pinned: Option<String>,
+    /// The digest the index publishes, `None` when it no longer lists the
+    /// skill.
+    pub published: Option<String>,
+    /// Whether a minimum release age holds the published digest back: an
+    /// index records no dates, so no change can be shown to be old enough.
+    pub held_back: bool,
+}
+
+impl DigestStatus {
+    /// Whether the index publishes another artifact than the pinned one, and
+    /// no minimum release age holds it back.
+    #[must_use]
+    pub fn is_outdated(&self) -> bool {
+        !self.held_back
+            && matches!((&self.pinned, &self.published), (Some(pinned), Some(published)) if pinned != published)
+    }
+}
+
+impl fmt::Display for DigestStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pinned = self.pinned.as_deref().map_or("not pinned", short_digest);
+        let verdict = match &self.published {
+            None => "no longer published".to_owned(),
+            Some(published) if self.is_outdated() => format!("-> {}", short_digest(published)),
+            Some(_) if self.pinned.is_none() => "follows the index".to_owned(),
+            Some(published) if self.held_back => format!(
+                "up to date  ({} has no recorded date)",
+                short_digest(published)
+            ),
+            Some(_) => "up to date".to_owned(),
+        };
+        write!(
+            formatter,
+            "{} {}  {pinned}  {verdict}",
+            self.origin, self.skill
+        )
+    }
+}
+
+/// `sha256:` and the first 8 hex digits, as `short` abbreviates a commit.
+fn short_digest(digest: &str) -> &str {
+    &digest[..digest.len().min("sha256:".len() + 8)]
+}
 
 /// Where one git source stands against its remote's releases.
 #[derive(Debug, Clone)]
@@ -122,41 +208,60 @@ pub async fn run(options: &Options, min_age: Option<Duration>) -> Result<()> {
 }
 
 /// Load the config `options` name and check each git source against its
-/// remote's releases, leaving out those younger than `min_age`.
+/// remote's releases, leaving out those younger than `min_age`, and each
+/// skill listed under a `well-known` source against its index.
 ///
 /// # Errors
 ///
 /// When `options` ask to stay offline, the config cannot be loaded, or a
-/// remote cannot be reached.
-pub async fn statuses(options: &Options, min_age: Option<Duration>) -> Result<Vec<Status>> {
+/// remote or an index cannot be reached.
+pub async fn statuses(options: &Options, min_age: Option<Duration>) -> Result<Vec<Entry>> {
     if options.offline {
-        bail!("`outdated` asks every remote for its tags; drop --offline");
+        bail!(
+            "`outdated` asks every remote for its tags and every origin for its index; drop --offline"
+        );
     }
     let context = Context::open(options)?;
-    check(&context.config, &options.cache_dir(), min_age).await
+    check(
+        &context.config,
+        &options.cache_dir(),
+        options.credentials_file(),
+        min_age,
+    )
+    .await
 }
 
-/// Ask each git source's remote for its releases.
+/// Ask each git source's remote for its releases, and each `well-known`
+/// origin for its index.
 ///
 /// With a `min_age` (zero means none), a source behind its newest release
 /// moves to the newest one at least that old, and the newest one left out is
 /// its `pending`. Only the tags of those candidates are fetched, into
-/// `cache_dir`, to read their dates.
+/// `cache_dir`, to read their dates. An index records no dates, so a
+/// `min_age` holds back every changed digest.
 ///
 /// # Errors
 ///
-/// When a remote cannot be reached.
+/// When a remote or an index cannot be reached.
 pub async fn check(
     config: &Config,
     cache_dir: &Path,
+    credentials: CredentialsFile,
     min_age: Option<Duration>,
-) -> Result<Vec<Status>> {
+) -> Result<Vec<Entry>> {
     let min_age = min_age.filter(|age| !age.is_zero());
     let now = SystemTime::now();
+    let well_known = WellKnown::new(cache_dir.to_owned(), false, credentials);
     let mut statuses = Vec::new();
     for repo in &config.repos {
-        let Source::Git { url, revision } = repo.source() else {
-            continue;
+        let (url, revision) = match repo.source() {
+            Source::Git { url, revision } => (url, revision),
+            Source::WellKnown { origin } => {
+                let digests = digests(&well_known, repo, &origin, min_age.is_some()).await?;
+                statuses.extend(digests.into_iter().map(Entry::Digest));
+                continue;
+            }
+            Source::Local => continue,
         };
         let tags = git::remote_tags(&url, &config.base_dir).await?;
         let mut status = Status {
@@ -171,9 +276,42 @@ pub async fn check(
         {
             hold_back(&mut status, &tags, config, cache_dir, min_age, now).await?;
         }
-        statuses.push(status);
+        statuses.push(Entry::Release(status));
     }
     Ok(statuses)
+}
+
+/// Where each skill `repo` lists stands against the index of `origin`. An
+/// entry without a `skills` list follows the index, so it has nothing to
+/// compare.
+async fn digests(
+    well_known: &WellKnown,
+    repo: &RepoSpec,
+    origin: &str,
+    hold: bool,
+) -> Result<Vec<DigestStatus>> {
+    let Some(pins) = &repo.skills else {
+        return Ok(Vec::new());
+    };
+    let index = well_known.index(origin).await?;
+    Ok(pins
+        .iter()
+        .map(|pin| {
+            let published = index
+                .skills
+                .iter()
+                .find(|entry| entry.name == pin.name)
+                .map(|entry| entry.digest.clone());
+            let changed = matches!((&pin.digest, &published), (Some(pinned), Some(published)) if pinned != published);
+            DigestStatus {
+                origin: origin.to_owned(),
+                skill: pin.name.clone(),
+                pinned: pin.digest.clone(),
+                published,
+                held_back: hold && changed,
+            }
+        })
+        .collect())
 }
 
 /// Move `status.latest` back to the newest release at least `min_age` old,
@@ -260,6 +398,43 @@ mod tests {
     }
 
     const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
+    #[test]
+    fn a_digest_status_reads_like_a_release_one() {
+        let old = format!("sha256:{}", "0".repeat(64));
+        let new = format!("sha256:{}", "1".repeat(64));
+        let status = |pinned: Option<&str>, published: Option<&str>, held_back| {
+            DigestStatus {
+                origin: "https://gw.example".to_owned(),
+                skill: "pdf".to_owned(),
+                pinned: pinned.map(str::to_owned),
+                published: published.map(str::to_owned),
+                held_back,
+            }
+            .to_string()
+        };
+
+        assert_eq!(
+            status(Some(&old), Some(&new), false),
+            "https://gw.example pdf  sha256:00000000  -> sha256:11111111"
+        );
+        assert_eq!(
+            status(Some(&old), Some(&old), false),
+            "https://gw.example pdf  sha256:00000000  up to date"
+        );
+        assert_eq!(
+            status(Some(&old), Some(&new), true),
+            "https://gw.example pdf  sha256:00000000  up to date  (sha256:11111111 has no recorded date)"
+        );
+        assert_eq!(
+            status(None, Some(&new), false),
+            "https://gw.example pdf  not pinned  follows the index"
+        );
+        assert_eq!(
+            status(Some(&old), None, false),
+            "https://gw.example pdf  sha256:00000000  no longer published"
+        );
+    }
 
     #[test]
     fn a_tag_behind_the_latest_release_is_outdated() {
@@ -388,10 +563,18 @@ mod tests {
         .unwrap();
         let config = Config::load(&path).unwrap();
 
-        check(&config, cache, Some(days * DAY))
+        let credentials = CredentialsFile {
+            path: cache.join("credentials.yaml"),
+            required: false,
+        };
+        match check(&config, cache, credentials, Some(days * DAY))
             .await
             .unwrap()
             .remove(0)
+        {
+            Entry::Release(status) => status,
+            Entry::Digest(status) => panic!("a git source checked as {status:?}"),
+        }
     }
 
     #[tokio::test]

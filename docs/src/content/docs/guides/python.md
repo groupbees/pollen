@@ -2,7 +2,7 @@
 title: Python
 description: Drive pollen from Python with the pollen-skills package, which returns typed results instead of printing them.
 sidebar:
-  order: 4
+  order: 5
 ---
 
 The `pollen-skills` package runs pollen inside Python. Every command is a
@@ -74,6 +74,7 @@ work like the CLI's global flags:
 | `targets` | `--target` | the config's `targets` |
 | `cache_dir` | `--cache-dir` | the user cache directory |
 | `offline` | `--offline` | `False` |
+| `credentials_file` | `--credentials-file` | the user-level credentials file, which may be absent; taken by `update`, `validate`, `outdated` and `autoupdate` |
 
 Paths can be `str` or `pathlib.Path`. The package does not read the
 `POLLEN_*` [environment variables](/reference/environment-variables/): pass
@@ -86,7 +87,7 @@ the arguments instead.
 | `update(dry_run=False, force=False)` | `pollen update` | `Report` |
 | `list_installed()` | `pollen list` | `list[Deployed]`, one per target |
 | `validate(config_only=False, pinned=False)` | `pollen validate` | `Validation` |
-| `outdated(min_release_age=None)` | `pollen outdated` | `list[SourceStatus]` |
+| `outdated(min_release_age=None)` | `pollen outdated` | `list[SourceStatus \| DigestStatus]` |
 | `autoupdate(freeze=False, dry_run=False, min_release_age=None)` | `pollen autoupdate` | `AutoupdateOutcome` |
 | `show(repo, revision=None, path=None)` | `pollen show` | `Listing` |
 | `schema()` | `pollen schema` | the JSON Schema, as a `str` |
@@ -96,8 +97,11 @@ invalid or a selected skill breaks the Agent Skills specification, with every
 offending skill in the message. Otherwise it returns the skills the config
 selects, or `skills=None` with `config_only=True`.
 
-`outdated` and `autoupdate` ask each remote for its tags, so they take no
-`offline` argument. `autoupdate` rewrites `pollen.yaml` unless `dry_run`;
+`outdated` and `autoupdate` ask each remote for its tags and each
+`well-known` origin for its index, so they take no `offline` argument.
+`outdated` returns a `SourceStatus` per git source and a `DigestStatus` per
+skill listed under a `well-known` source; `autoupdate`'s outcome lists the
+moved revisions in `bumps` and the written digests in `digests`. `autoupdate` rewrites `pollen.yaml` unless `dry_run`;
 `outcome.written` says whether it did. `min_release_age` is a
 `datetime.timedelta`, the `--min-release-age` of the command line; the newest
 release it leaves out is the status's `pending`, with its `age`.

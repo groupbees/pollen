@@ -1,11 +1,12 @@
 ---
 title: pollen
-description: Deploy Agent Skills from git repositories and local directories, declaratively, from a single pollen.yaml.
+description: Deploy Agent Skills from git repositories, local directories and well-known indexes, declaratively, from a single pollen.yaml.
 ---
 
 `pollen` is a small CLI that reads a `pollen.yaml` describing where your
-skills come from — git repositories pinned to a revision, or directories next
-to the config file — and makes your skills directories match it: it installs
+skills come from — git repositories pinned to a revision, directories next
+to the config file, or origins publishing a well-known discovery index such as
+a LiteLLM gateway — and makes your skills directories match it: it installs
 what is declared, refreshes what moved, and removes what you dropped. The file
 is shaped after `pre-commit`'s: a list of repos, each with a revision and the
 paths to pull from.

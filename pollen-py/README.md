@@ -1,8 +1,8 @@
 # pollen-skills
 
 Python bindings for [pollen](https://github.com/groupbees/pollen), which
-deploys Agent Skills declared in a `pollen.yaml` from git repositories and
-local directories. Every `pollen` command is a function that returns typed
+deploys Agent Skills declared in a `pollen.yaml` from git repositories, local
+directories and well-known discovery indexes. Every `pollen` command is a function that returns typed
 results instead of printing them; the engine is the same Rust code as the CLI,
 compiled into the package.
 

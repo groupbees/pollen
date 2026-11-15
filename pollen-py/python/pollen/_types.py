@@ -54,6 +54,8 @@ class InstalledSkill:
     repo: str
     revision: str | None
     commit: str | None
+    digest: str | None
+    """The digest of the artifact a `well-known` source served."""
     source_path: str
     checksum: str
 
@@ -74,6 +76,8 @@ class PlannedSkill:
     repo: str
     revision: str | None
     commit: str | None
+    digest: str | None
+    """The digest of the artifact a `well-known` source serves."""
     source_path: str
 
 
@@ -121,6 +125,21 @@ class SourceStatus:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class DigestStatus:
+    """Where one skill listed under a `well-known` source stands against its index."""
+
+    origin: str
+    skill: str
+    pinned: str | None
+    """The `digest:` in the config, `None` when the skill follows the index."""
+    published: str | None
+    """The digest the index publishes, `None` when it no longer lists the skill."""
+    held_back: bool
+    """Whether a minimum release age holds the published digest back."""
+    is_outdated: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Bump:
     """One `revision:` an autoupdate moves."""
 
@@ -132,11 +151,23 @@ class Bump:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class DigestBump:
+    """One `digest:` of a `well-known` skill an autoupdate writes."""
+
+    origin: str
+    skill: str
+    from_digest: str | None
+    """The digest it holds now, `None` when it has none."""
+    to_digest: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class AutoupdateOutcome:
     """What an autoupdate changed, or would change."""
 
     path: Path
     bumps: list[Bump]
+    digests: list[DigestBump]
     written: bool
     """Whether the config file was rewritten."""
 

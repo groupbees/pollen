@@ -109,6 +109,22 @@ jobs:
       - name: build the bindings and run their tests
         run: uv run --locked pytest
 
+  litellm:
+    name: litellm
+    runs-on: ubuntu-24.04
+    steps:
+      - name: check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: cache the cargo build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
+
+      - name: install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: deploy skills from a LiteLLM proxy
+        run: tests/litellm.sh
+
   homebrew-formula:
     name: homebrew formula
     runs-on: macos-15

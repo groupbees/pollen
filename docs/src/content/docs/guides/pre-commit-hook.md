@@ -2,7 +2,7 @@
 title: Pre-commit hook
 description: Validate a pollen.yaml on every commit with the published pre-commit hook.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 `pollen` publishes a hook, so a repository that carries a `pollen.yaml`

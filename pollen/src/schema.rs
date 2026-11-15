@@ -103,6 +103,31 @@ mod tests {
     }
 
     #[test]
+    fn accepts_a_well_known_source() {
+        for config in [
+            "repos:\n  - well-known: https://x.example\n",
+            "repos:\n  - well-known: https://x.example\n    exclude: ^a\n",
+            "repos:\n  - well-known: https://x.example\n    skills:\n      - name: a\n        digest: sha256:0000000000000000000000000000000000000000000000000000000000000000\n",
+        ] {
+            assert!(validator().is_valid(&yaml(config)), "{config}");
+        }
+    }
+
+    #[test]
+    fn rejects_keys_that_do_not_belong_to_the_kind_of_source() {
+        for config in [
+            "repos:\n  - repo: local\n    well-known: https://x.example\n    paths:\n      - path: .\n",
+            "repos:\n  - well-known: https://x.example\n    revision: v1\n",
+            "repos:\n  - well-known: https://x.example\n    paths:\n      - path: .\n",
+            "repos:\n  - well-known: https://x.example\n    exclude: ^a\n    skills:\n      - name: a\n",
+            "repos:\n  - repo: local\n    exclude: ^a\n    paths:\n      - path: .\n",
+            "repos:\n  - well-known: https://x.example\n    skills:\n      - name: a\n        digest: sha256:00\n",
+        ] {
+            assert!(!validator().is_valid(&yaml(config)), "{config}");
+        }
+    }
+
+    #[test]
     fn rejects_the_singular_target_key() {
         let config =
             yaml("target: .claude/skills\nrepos:\n  - repo: local\n    paths:\n      - path: .\n");

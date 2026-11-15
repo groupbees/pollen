@@ -2,7 +2,15 @@ from datetime import timedelta
 from os import PathLike
 from typing import TypeAlias
 
-from pollen._types import AutoupdateOutcome, Deployed, Listing, Report, SourceStatus, Validation
+from pollen._types import (
+    AutoupdateOutcome,
+    Deployed,
+    DigestStatus,
+    Listing,
+    Report,
+    SourceStatus,
+    Validation,
+)
 
 StrPath: TypeAlias = str | PathLike[str]
 
@@ -16,6 +24,7 @@ def update(
     targets: list[StrPath] | None = None,
     cache_dir: StrPath | None = None,
     offline: bool = False,
+    credentials_file: StrPath | None = None,
     dry_run: bool = False,
     force: bool = False,
 ) -> Report:
@@ -38,6 +47,7 @@ def validate(
     targets: list[StrPath] | None = None,
     cache_dir: StrPath | None = None,
     offline: bool = False,
+    credentials_file: StrPath | None = None,
     config_only: bool = False,
     pinned: bool = False,
 ) -> Validation:
@@ -49,9 +59,10 @@ def outdated(
     global_: bool = False,
     targets: list[StrPath] | None = None,
     cache_dir: StrPath | None = None,
+    credentials_file: StrPath | None = None,
     min_release_age: timedelta | None = None,
-) -> list[SourceStatus]:
-    """Where each git source stands against its remote's releases."""
+) -> list[SourceStatus | DigestStatus]:
+    """Where each git source and each listed `well-known` skill stands."""
 
 def autoupdate(
     *,
@@ -59,11 +70,12 @@ def autoupdate(
     global_: bool = False,
     targets: list[StrPath] | None = None,
     cache_dir: StrPath | None = None,
+    credentials_file: StrPath | None = None,
     freeze: bool = False,
     dry_run: bool = False,
     min_release_age: timedelta | None = None,
 ) -> AutoupdateOutcome:
-    """Move every git source to its newest release."""
+    """Move every git source to its newest release, and every pinned skill to its digest."""
 
 def show(
     repo: str,

@@ -23,6 +23,8 @@ pub struct Planned {
     pub revision: Option<String>,
     /// The commit the revision resolved to.
     pub commit: Option<String>,
+    /// The digest of the artifact a `well-known` source served it as.
+    pub digest: Option<String>,
     /// Its path inside the source.
     pub source_path: String,
     /// Fingerprint of its tree.
@@ -70,37 +72,56 @@ pub async fn build(config: &Config, materializer: &impl Materializer) -> Result<
             .canonicalize()
             .with_context(|| format!("{} does not exist", fetched.root.display()))?;
 
+        // A `well-known` source selects its skills itself, by name; the
+        // others select them under `paths:`.
+        let mut candidates: Vec<(PathBuf, String, Option<String>)> = fetched
+            .skills
+            .iter()
+            .map(|skill| {
+                (
+                    skill.dir.clone(),
+                    skill.name.clone(),
+                    Some(skill.digest.clone()),
+                )
+            })
+            .collect();
         for spec in &repo.paths {
             for dir in discovery::discover(&root, spec)? {
-                let frontmatter = match skill::load(&dir) {
-                    Ok(frontmatter) => frontmatter,
-                    Err(error) => {
-                        problems.push(format!("{label}: {error}"));
-                        continue;
-                    }
-                };
-
-                let planned = Planned {
-                    name: frontmatter.name,
-                    source_path: relative_slug(&root, &dir),
-                    checksum: deploy::checksum(&dir)?,
-                    source_dir: dir,
-                    repo: repo.repo.clone(),
-                    revision: repo.revision.clone(),
-                    commit: fetched.resolved.clone(),
-                };
-
-                if let Some(existing) = skills.get(&planned.name) {
-                    bail!(
-                        "two sources provide the skill `{}`: {} and {}",
-                        planned.name,
-                        existing.origin(),
-                        planned.origin()
-                    );
-                }
-                tracing::debug!(skill = %planned.name, origin = %planned.origin(), "selected");
-                skills.insert(planned.name.clone(), planned);
+                let source_path = relative_slug(&root, &dir);
+                candidates.push((dir, source_path, None));
             }
+        }
+
+        for (dir, source_path, digest) in candidates {
+            let frontmatter = match skill::load(&dir) {
+                Ok(frontmatter) => frontmatter,
+                Err(error) => {
+                    problems.push(format!("{label}: {error}"));
+                    continue;
+                }
+            };
+
+            let planned = Planned {
+                name: frontmatter.name,
+                source_path,
+                checksum: deploy::checksum(&dir)?,
+                source_dir: dir,
+                repo: repo.location(),
+                revision: repo.revision.clone(),
+                commit: fetched.resolved.clone(),
+                digest,
+            };
+
+            if let Some(existing) = skills.get(&planned.name) {
+                bail!(
+                    "two sources provide the skill `{}`: {} and {}",
+                    planned.name,
+                    existing.origin(),
+                    planned.origin()
+                );
+            }
+            tracing::debug!(skill = %planned.name, origin = %planned.origin(), "selected");
+            skills.insert(planned.name.clone(), planned);
         }
     }
 
