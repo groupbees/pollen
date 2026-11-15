@@ -1,0 +1,93 @@
+name: binaries
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version in the archive names; when set, the archives are kept as workflow artifacts
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binaries-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  binaries:
+    name: binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15
+            target: x86_64-apple-darwin
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+      ARCHIVE: pollen-${{ matrix.target }}${{ inputs.version && format('-v{0}', inputs.version) || '' }}
+      BINARY: pollen${{ endsWith(matrix.target, '-windows-msvc') && '.exe' || '' }}
+      FORMAT: ${{ endsWith(matrix.target, '-windows-msvc') && 'zip' || 'tar.gz' }}
+    steps:
+      - name: check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: install the pinned toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add "$TARGET"
+
+      # ring compiles C, and cc-rs looks for a cross compiler named
+      # `<arch>-linux-musl-gcc` that Ubuntu does not ship; its native musl-gcc
+      # wrapper builds for the runner's own architecture.
+      - name: install the musl C compiler
+        if: ${{ endsWith(matrix.target, '-linux-musl') }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends musl-tools
+          echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
+
+      - name: build the release binary
+        run: cargo build --release --locked --target "$TARGET"
+
+      # The x86_64 macOS binary is cross-built on Apple Silicon and runs here
+      # under Rosetta 2, which the macos-15 image ships.
+      - name: check that the binary runs
+        run: '"target/${TARGET}/release/${BINARY}" --version'
+
+      - name: package the archive
+        run: |
+          mkdir "$ARCHIVE"
+          cp "target/${TARGET}/release/${BINARY}" LICENSE README.md "$ARCHIVE/"
+          if [ "$FORMAT" = zip ]; then
+            # Git Bash's GNU tar cannot write a zip; the bsdtar Windows ships can.
+            "$(cygpath "$SYSTEMROOT")/System32/tar.exe" -a -cf "${ARCHIVE}.zip" "$ARCHIVE"
+          else
+            # BSD tar on macOS otherwise adds AppleDouble `._*` entries.
+            COPYFILE_DISABLE=1 tar -czf "${ARCHIVE}.tar.gz" "$ARCHIVE"
+          fi
+
+      - name: keep the archive for the release job
+        if: ${{ inputs.version != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}.${{ env.FORMAT }}
+          if-no-files-found: error
