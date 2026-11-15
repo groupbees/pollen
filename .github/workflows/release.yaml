@@ -98,6 +98,42 @@ jobs:
           path: ${{ env.ARCHIVE }}.${{ env.FORMAT }}
           if-no-files-found: error
 
+  sbom:
+    name: sbom
+    needs:
+      - version
+    runs-on: ubuntu-24.04
+    env:
+      SBOM: pollen-v${{ needs.version.outputs.version }}.cdx.json
+    steps:
+      - name: check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: install cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx@0.5.10
+
+      # One SBOM covers every archive: `--target all` lists the dependencies of
+      # each platform the release ships. No SOURCE_DATE_EPOCH: with it
+      # cargo-cyclonedx drops `serialNumber`, and actions/attest rejects a
+      # CycloneDX SBOM without one.
+      - name: describe the pollen binary
+        run: |
+          cargo cyclonedx --manifest-path pollen/Cargo.toml --describe binaries \
+            --target all --format json --spec-version 1.6
+          mv pollen/pollen_bin.cdx.json "$SBOM"
+
+      - name: keep the SBOM for the release job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: pollen-sbom
+          path: ${{ env.SBOM }}
+          if-no-files-found: error
+
   wheels:
     name: wheels
     needs:
@@ -220,12 +256,18 @@ jobs:
     needs:
       - version
       - binaries
+      - sbom
     # A pre-release keeps its archives as workflow artifacts and gets no page,
     # so the stable release's notes are not a repeat of the rc's.
     if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      # Sigstore signs the attestations with a certificate bound to this run.
+      id-token: write
+      attestations: write
+    env:
+      SBOM: pollen-v${{ needs.version.outputs.version }}.cdx.json
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -250,6 +292,23 @@ jobs:
       - name: write the checksums
         working-directory: artifacts
         run: sha256sum -- *.tar.gz *.zip > SHA256SUMS
+
+      - name: attest the provenance of the release files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
+        with:
+          subject-path: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/SHA256SUMS
+            artifacts/${{ env.SBOM }}
+
+      - name: attest the SBOM of the archives
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
+        with:
+          subject-path: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+          sbom-path: artifacts/${{ env.SBOM }}
 
       - name: create the GitHub release
         env:

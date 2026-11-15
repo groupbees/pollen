@@ -224,7 +224,7 @@ commit gate stays fast.
 | [docs.yaml](.github/workflows/docs.yaml) | pushes to `main` and pull requests touching `docs/`, `assets/` or the workflow; manual | Builds every version of the documentation site, links validated; on `main`, deploys it to GitHub Pages | `git fetch --tags` then `npm --prefix docs run build:versions` |
 | [security.yaml](.github/workflows/security.yaml) | every push to `main`, every pull request, daily, manual | `trivy fs` over the repo, failing on fixable `HIGH`/`CRITICAL`, and a second non-blocking scan uploaded to code scanning | `trivy fs .` |
 | [scorecard.yaml](.github/workflows/scorecard.yaml) | every push to `main`, weekly, any change to the branch protection rules | The OpenSSF Scorecard analysis, published for the README badge and uploaded to code scanning | none: it reads the repository's settings on GitHub |
-| [release.yaml](.github/workflows/release.yaml) | tag `v*` | Checks the tag against `Cargo.toml`, builds the `.tar.gz` archives for Linux (musl, x86_64 and arm64) and macOS (arm64 and x86_64) and the `.zip` archives for Windows (MSVC, x86_64 and arm64, each on its native runner), creates the GitHub release with a `SHA256SUMS` over all of them and notes starting from the previous stable tag, installs and tests the Homebrew formula rendered from that `SHA256SUMS` and pushes it to [groupbees/homebrew-tap](https://github.com/groupbees/homebrew-tap), then runs `docs` on `main` so the site's root serves the new release. Alongside, builds the Python wheels (abi3, Python ≥ 3.11) for the same platforms plus musllinux, checks that each native one imports, builds the sdist, and publishes them to PyPI as `pollen-skills`. A pre-release tag (`v0.2.0-rc1`) builds the archives and keeps them as workflow artifacts, without a release page; its wheels still go to PyPI, as a pre-release pip installs only when asked | `uvx maturin build --release --manifest-path pollen-py/Cargo.toml` builds the wheel for the host |
+| [release.yaml](.github/workflows/release.yaml) | tag `v*` | Checks the tag against `Cargo.toml`, builds the `.tar.gz` archives for Linux (musl, x86_64 and arm64) and macOS (arm64 and x86_64) and the `.zip` archives for Windows (MSVC, x86_64 and arm64, each on its native runner), describes the binary in a CycloneDX SBOM (`cargo cyclonedx`, every target's dependencies), creates the GitHub release with a `SHA256SUMS` over all the archives and notes starting from the previous stable tag, after attesting the build provenance of the archives, `SHA256SUMS` and the SBOM and attesting the SBOM against each archive, installs and tests the Homebrew formula rendered from that `SHA256SUMS` and pushes it to [groupbees/homebrew-tap](https://github.com/groupbees/homebrew-tap), then runs `docs` on `main` so the site's root serves the new release. Alongside, builds the Python wheels (abi3, Python ≥ 3.11) for the same platforms plus musllinux, checks that each native one imports, builds the sdist, and publishes them to PyPI as `pollen-skills`, each with its PEP 740 attestation. A pre-release tag (`v0.2.0-rc1`) builds the archives and keeps them and the SBOM as workflow artifacts, without a release page or attestations; its wheels still go to PyPI, as a pre-release pip installs only when asked | `uvx maturin build --release --manifest-path pollen-py/Cargo.toml` builds the wheel for the host |
 
 `quality` and `security` are the checks that block a merge; `docs` is
 path-filtered, so it is never a required check. `release` has no local
@@ -236,7 +236,8 @@ GitHub App installed on that repository with `contents: write`, whose client
 ID is the `HOMEBREW_TAP_CLIENT_ID` repository variable and whose private key
 is the `HOMEBREW_TAP_PRIVATE_KEY` secret. Everything else uses the workflow's
 own `GITHUB_TOKEN`: `release` holds `contents: write` in the job that creates
-the release; `security`
+the release, along with `id-token: write` and `attestations: write` to sign
+and store its attestations; `security`
 holds `security-events: write` for the SARIF upload and nothing else, and
 `scorecard` that plus `id-token: write` to publish its score. The
 `docs` deploy job holds `pages: write` and `id-token: write`, and `release`'s
@@ -246,7 +247,8 @@ the `github-pages` environment.
 `release`'s `pypi` job publishes through PyPI trusted publishing: it holds
 `id-token: write` and runs in the `pypi` environment, and the `pollen-skills`
 project on PyPI trusts this repository's `release.yaml` in that environment.
-No PyPI token is stored anywhere.
+No PyPI token is stored anywhere. The same OIDC identity signs the PEP 740
+attestation `pypa/gh-action-pypi-publish` uploads with each distribution.
 
 ## The generated JSON Schema
 
