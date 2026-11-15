@@ -294,24 +294,19 @@ async fn digests(
         return Ok(Vec::new());
     };
     let index = well_known.index(origin).await?;
-    Ok(pins
-        .iter()
+    pins.iter()
         .map(|pin| {
-            let published = index
-                .skills
-                .iter()
-                .find(|entry| entry.name == pin.name)
-                .map(|entry| entry.digest.clone());
+            let published = index.find(&pin.name)?.map(|entry| entry.digest.clone());
             let changed = matches!((&pin.digest, &published), (Some(pinned), Some(published)) if pinned != published);
-            DigestStatus {
+            Ok(DigestStatus {
                 origin: origin.to_owned(),
                 skill: pin.name.clone(),
                 pinned: pin.digest.clone(),
                 published,
                 held_back: hold && changed,
-            }
+            })
         })
-        .collect())
+        .collect()
 }
 
 /// Move `status.latest` back to the newest release at least `min_age` old,

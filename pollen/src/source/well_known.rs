@@ -103,14 +103,31 @@ impl Index {
         })
     }
 
-    /// The entries `repo` selects: the ones its `skills` list names, each
-    /// matching its pinned `digest`, else every entry of a known type that
-    /// `exclude` does not reject.
+    /// The entry named `name`, `None` when the index does not list it.
     ///
     /// # Errors
     ///
-    /// When a listed skill is missing from the index, has a type pollen does
-    /// not know, or is published with a digest other than the pinned one.
+    /// When the index lists it but pollen cannot install it: see
+    /// [`Entry::check`].
+    pub fn find(&self, name: &str) -> Result<Option<&Entry>> {
+        let Some(entry) = self.skills.iter().find(|entry| entry.name == name) else {
+            return Ok(None);
+        };
+        entry
+            .check()
+            .map_err(|error| anyhow::anyhow!("{}: {error}", self.url))?;
+        Ok(Some(entry))
+    }
+
+    /// The entries `repo` selects: the ones its `skills` list names, each
+    /// matching its pinned `digest`, else every entry that `exclude` does not
+    /// reject and that pollen can install; the others are skipped with a
+    /// warning.
+    ///
+    /// # Errors
+    ///
+    /// When a listed skill is missing from the index, cannot be installed,
+    /// or is published with a digest other than the pinned one.
     pub fn select(&self, repo: &RepoSpec) -> Result<Vec<&Entry>> {
         let url = &self.url;
         let Some(pins) = &repo.skills else {
@@ -122,14 +139,10 @@ impl Index {
                     .is_some_and(|pattern| pattern.is_match(&entry.name))
                 {
                     tracing::debug!(skill = %entry.name, "excluded");
-                } else if known(&entry.kind) {
-                    selected.push(entry);
+                } else if let Err(error) = entry.check() {
+                    tracing::warn!("{url}: {error}; skipped");
                 } else {
-                    tracing::warn!(
-                        "{url}: `{}` has the type `{}`, which pollen does not know; skipped",
-                        entry.name,
-                        entry.kind
-                    );
+                    selected.push(entry);
                 }
             }
             return Ok(selected);
@@ -138,17 +151,8 @@ impl Index {
         pins.iter()
             .map(|pin| {
                 let entry = self
-                    .skills
-                    .iter()
-                    .find(|entry| entry.name == pin.name)
+                    .find(&pin.name)?
                     .with_context(|| format!("{url} does not list the skill `{}`", pin.name))?;
-                if !known(&entry.kind) {
-                    bail!(
-                        "{url}: `{}` has the type `{}`, which pollen does not know",
-                        entry.name,
-                        entry.kind
-                    );
-                }
                 if let Some(digest) = &pin.digest
                     && *digest != entry.digest
                 {
@@ -161,6 +165,36 @@ impl Index {
                 Ok(entry)
             })
             .collect()
+    }
+}
+
+impl Entry {
+    /// Whether pollen can install this entry.
+    ///
+    /// # Errors
+    ///
+    /// When its type is not one pollen knows, its name breaks the Agent
+    /// Skills specification, which pollen also relies on to name its
+    /// directory, or its digest is not `sha256:` and 64 lowercase hex digits.
+    pub fn check(&self) -> Result<()> {
+        if !known(&self.kind) {
+            bail!(
+                "`{}` has the type `{}`, which pollen does not know",
+                self.name,
+                self.kind
+            );
+        }
+        skill::validate_name(&self.name).map_err(|error| {
+            anyhow::anyhow!("`{}` is not a valid skill name: {error}", self.name)
+        })?;
+        if !is_digest(&self.digest) {
+            bail!(
+                "`{}` has the digest `{}`, not `sha256:` and 64 lowercase hex digits",
+                self.name,
+                self.digest
+            );
+        }
+        Ok(())
     }
 }
 
@@ -292,19 +326,9 @@ impl WellKnown {
         })
     }
 
-    /// The skill directory of `entry`, downloaded and unpacked unless a
-    /// previous run left it in the cache.
+    /// The skill directory of `entry`, which [`Index::select`] has checked,
+    /// downloaded and unpacked unless a previous run left it in the cache.
     async fn artifact(&self, index: &Index, entry: &Entry, root: &Path) -> Result<PathBuf> {
-        skill::validate_name(&entry.name).map_err(|error| {
-            anyhow::anyhow!("`{}` is not a valid skill name: {error}", entry.name)
-        })?;
-        if !is_digest(&entry.digest) {
-            bail!(
-                "the index gives `{}` the digest `{}`, not `sha256:` and 64 lowercase hex digits",
-                entry.name,
-                entry.digest
-            );
-        }
         let hex = &entry.digest["sha256:".len()..];
         let unpacked = root.join(hex);
         let dir = unpacked.join(&entry.name);
@@ -525,6 +549,44 @@ mod tests {
     }
 
     #[test]
+    fn skips_the_entries_it_cannot_install_when_following_the_index() {
+        let index = index(&[
+            entry("keep", SKILL_MD, "k", A),
+            entry("PDF_Summarizer", SKILL_MD, "p", A),
+            entry("short-digest", SKILL_MD, "s", "sha256:abc"),
+            entry("upper-digest", SKILL_MD, "u", &A.to_uppercase()),
+        ]);
+
+        assert_eq!(names(&index.select(&repo(None, None)).unwrap()), ["keep"]);
+    }
+
+    #[test]
+    fn refuses_a_listed_skill_it_cannot_install() {
+        let index = index(&[
+            entry("PDF_Summarizer", SKILL_MD, "p", A),
+            entry("short-digest", SKILL_MD, "s", "sha256:abc"),
+            entry("future", "plugin", "f", A),
+        ]);
+
+        for (name, reason) in [
+            ("PDF_Summarizer", "not a valid skill name"),
+            ("short-digest", "64 lowercase hex digits"),
+            ("future", "does not know"),
+        ] {
+            let error = index
+                .select(&repo(Some(vec![(name, None)]), None))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.starts_with("https://x.example/") && error.contains(reason),
+                "{error}"
+            );
+            assert!(index.find(name).is_err());
+        }
+        assert_eq!(index.find("missing").unwrap(), None);
+    }
+
+    #[test]
     fn selects_the_listed_skills_at_their_pinned_digest() {
         let index = index(&[entry("a", SKILL_MD, "a", A), entry("b", SKILL_MD, "b", B)]);
 
@@ -653,6 +715,40 @@ mod tests {
         assert!(error.contains("does not match its digest"), "{error}");
         let artifacts = cache.path().join("well-known/artifacts");
         assert_eq!(std::fs::read_dir(artifacts).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn installs_the_rest_of_an_index_listing_an_invalid_entry() {
+        let server = MockServer::start().await;
+        let markdown = skill_md("single");
+        serve(
+            &server,
+            INDEX_PATH,
+            index_body(&[
+                entry("PDF_Summarizer", SKILL_MD, "/bad.md", &digest(&markdown)),
+                entry("single", SKILL_MD, "/single.md", &digest(&markdown)),
+                entry("broken", SKILL_MD, "/broken.md", "sha256:not-hex"),
+            ])
+            .into_bytes(),
+            "application/json",
+        )
+        .await;
+        serve(&server, "/single.md", markdown, "text/markdown").await;
+        let cache = tempfile::tempdir().unwrap();
+        let mut source = repo(None, None);
+        source.well_known = Some(server.uri());
+
+        let materialized = well_known(cache.path(), false)
+            .materialize(&source)
+            .await
+            .unwrap();
+
+        let names: Vec<_> = materialized
+            .skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect();
+        assert_eq!(names, ["single"]);
     }
 
     #[tokio::test]
