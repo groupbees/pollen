@@ -454,21 +454,29 @@ mod well_known {
         format!("sha256:{}", hex::encode(Sha256::digest(body.as_bytes())))
     }
 
-    /// Serve an index listing each `(name, SKILL.md)` as a `skill-md` entry.
-    async fn publish(server: &MockServer, skills: &[(&str, &str)]) {
+    fn entry(name: &str, digest: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "type": "skill-md",
+            "description": "d",
+            "url": format!("{name}/SKILL.md"),
+            "digest": digest,
+        })
+    }
+
+    /// Serve an index listing each `(name, SKILL.md)` as a `skill-md` entry,
+    /// then the `extra` entries, which have no artifact.
+    async fn publish_with(
+        server: &MockServer,
+        skills: &[(&str, &str)],
+        extra: Vec<serde_json::Value>,
+    ) {
         server.reset().await;
-        let entries: Vec<_> = skills
+        let mut entries: Vec<_> = skills
             .iter()
-            .map(|(name, body)| {
-                serde_json::json!({
-                    "name": name,
-                    "type": "skill-md",
-                    "description": "d",
-                    "url": format!("{name}/SKILL.md"),
-                    "digest": digest(body),
-                })
-            })
+            .map(|(name, body)| entry(name, &digest(body)))
             .collect();
+        entries.extend(extra);
         Mock::given(method("GET"))
             .and(path("/.well-known/agent-skills/index.json"))
             .respond_with(
@@ -484,6 +492,10 @@ mod well_known {
                 .mount(server)
                 .await;
         }
+    }
+
+    async fn publish(server: &MockServer, skills: &[(&str, &str)]) {
+        publish_with(server, skills, Vec::new()).await;
     }
 
     fn options(config: &Path, cache: &Path, credentials: PathBuf) -> Options {
@@ -595,5 +607,74 @@ mod well_known {
 
         assert!(outcome.digests.is_empty());
         assert!(std::fs::read_to_string(&config).unwrap().contains(&old));
+    }
+
+    #[tokio::test]
+    async fn every_command_skips_an_invalid_entry_unless_it_is_listed() {
+        let server = MockServer::start().await;
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let alpha = skill_md("alpha", "a");
+        publish_with(
+            &server,
+            &[("alpha", &alpha)],
+            vec![
+                entry("PDF_Summarizer", &digest(&alpha)),
+                entry("broken", "sha256:not-a-digest"),
+            ],
+        )
+        .await;
+        let credentials = workspace.path().join("credentials.yaml");
+        std::fs::write(&credentials, "credentials: []\n").unwrap();
+        let config = workspace.path().join("pollen.yaml");
+        let follow = format!("repos:\n  - well-known: {}\n", server.uri());
+        std::fs::write(&config, &follow).unwrap();
+        let mut options = options(&config, cache.path(), credentials);
+        options.targets = vec![workspace.path().join("deployed")];
+
+        let report = update::report(&options, false, false).await.unwrap();
+        assert_eq!(report.count(update::Action::Added), 1);
+        assert!(workspace.path().join("deployed/alpha/SKILL.md").is_file());
+        let validation = validate::check(&options, &config, false, false)
+            .await
+            .unwrap();
+        assert_eq!(validation.skills.unwrap().len(), 1);
+        assert!(outdated::statuses(&options, None).await.unwrap().is_empty());
+        let frozen = autoupdate::apply(&options, true, false, None)
+            .await
+            .unwrap();
+        assert!(frozen.digests.is_empty());
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), follow);
+
+        std::fs::write(
+            &config,
+            format!("{follow}    skills:\n      - name: alpha\n      - name: broken\n"),
+        )
+        .unwrap();
+        let errors = [
+            format!(
+                "{:#}",
+                update::report(&options, false, false).await.unwrap_err()
+            ),
+            format!(
+                "{:#}",
+                validate::check(&options, &config, false, false)
+                    .await
+                    .unwrap_err()
+            ),
+            format!(
+                "{:#}",
+                outdated::statuses(&options, None).await.unwrap_err()
+            ),
+            format!(
+                "{:#}",
+                autoupdate::apply(&options, true, false, None)
+                    .await
+                    .unwrap_err()
+            ),
+        ];
+        for error in errors {
+            assert!(error.contains("`broken` has the digest"), "{error}");
+        }
     }
 }

@@ -206,6 +206,13 @@ records no dates either, so `--min-release-age` holds back every changed
 digest rather than guess an age. See
 [ADR 0002](docs/adr/0002-fetch-skills-from-well-known-discovery-indexes.md).
 
+**A source that follows an index skips what it cannot install.** One entry
+with an unknown type, a name the specification refuses or a malformed
+digest is the publisher's problem, and failing on it would break every
+config following that index until each adds an `exclude`. So selection
+leaves it out with a warning, the same way for every command; an entry
+listed under `skills` was asked for by name, and still fails the run.
+
 **Credentials live outside the project.** `pollen.yaml` is shared and
 version-controlled, so a token or a command in it would let a cloned
 repository make pollen run code or send a secret anywhere. The credentials

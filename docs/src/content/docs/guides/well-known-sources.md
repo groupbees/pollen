@@ -36,10 +36,15 @@ repos:
 `well-known` is an origin — scheme, host and optional port — with no path.
 pollen reads `<origin>/.well-known/agent-skills/index.json`, downloads each
 selected skill, either a `SKILL.md` or a `.tar.gz` or `.zip` archive, checks
-it against the index's `digest`, and deploys it. A skill whose type pollen
-does not know is skipped with a warning; one listed under `skills` fails the
-run instead. The keys are in the
+it against the index's `digest`, and deploys it. The keys are in the
 [configuration reference](/reference/configuration/).
+
+An entry pollen cannot install is skipped with a warning, and the rest of the
+index deploys: a type pollen does not know, a name the
+[Agent Skills specification](https://agentskills.io/specification) refuses
+(such as `PDF_Summarizer`), or a digest that is not `sha256:` and 64 lowercase
+hex digits. Listed under `skills`, the same entry fails every command instead,
+since it was asked for by name.
 
 An index whose `$schema` is not the v0.2.0 one, or that has none, is refused.
 
