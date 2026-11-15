@@ -339,10 +339,12 @@ mod tests {
 
     #[tokio::test]
     async fn gives_up_on_a_body_that_stalls() {
-        use tokio::io::AsyncWriteExt;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let (listener, url) = silent_server().await;
         let held = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
+            // Answering before the request is read makes hyper drop the connection.
+            let _ = stream.read(&mut [0; 1024]).await.unwrap();
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\nabc")
                 .await
