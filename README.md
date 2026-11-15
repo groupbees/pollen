@@ -8,6 +8,7 @@
   <a href="https://github.com/groupbees/pollen/releases/latest"><img src="https://img.shields.io/github/v/release/groupbees/pollen?sort=semver" alt="Latest release"></a>
   <a href="https://github.com/groupbees/pollen/actions/workflows/quality.yaml"><img src="https://img.shields.io/github/actions/workflow/status/groupbees/pollen/quality.yaml?branch=main&label=quality" alt="Quality"></a>
   <a href="https://groupbees.github.io/pollen/"><img src="https://img.shields.io/badge/docs-groupbees.github.io%2Fpollen-3B3FD8" alt="Documentation"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/groupbees/pollen"><img src="https://api.scorecard.dev/projects/github.com/groupbees/pollen/badge" alt="OpenSSF Scorecard"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/groupbees/pollen" alt="License"></a>
   <a href="https://agentskills.io"><img src="https://img.shields.io/badge/Agent%20Skills-compatible-8E4BF7" alt="Agent Skills"></a>
   <a href="https://github.com/groupbees/pollen/stargazers"><img src="https://img.shields.io/github/stars/groupbees/pollen?style=social" alt="GitHub stars"></a>
