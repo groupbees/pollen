@@ -42,6 +42,26 @@ line in `SHA256SUMS`:
 Get-FileHash -Algorithm SHA256 pollen-x86_64-pc-windows-msvc-v*.zip
 ```
 
+### Verify the provenance
+
+Each archive, `SHA256SUMS` and the SBOM carry a signed
+[build provenance attestation](https://docs.github.com/en/actions/concepts/security/artifact-attestations):
+proof that this repository's release workflow built them from the tagged
+commit. Check one with the [GitHub CLI](https://cli.github.com):
+
+```sh
+gh attestation verify pollen-aarch64-apple-darwin-v*.tar.gz --repo groupbees/pollen
+```
+
+The release also ships a CycloneDX SBOM, `pollen-v<version>.cdx.json`, listing
+the crates compiled into the binary on every platform. It is attested against
+each archive:
+
+```sh
+gh attestation verify pollen-aarch64-apple-darwin-v*.tar.gz --repo groupbees/pollen \
+  --predicate-type https://cyclonedx.org/bom
+```
+
 ## Install or upgrade script
 
 The `pollen` skill ships two scripts that download a release, check it against
@@ -80,5 +100,15 @@ uv tool install pollen-skills   # or: pipx install pollen-skills
 `python -m pollen` runs the same command through the Python interpreter, for
 machines whose policy blocks executables that are not signed, such as a
 downloaded `pollen.exe`.
+
+Every wheel and the sdist are published with a
+[PEP 740](https://peps.python.org/pep-0740/) attestation, signed by this
+repository's release workflow. Check one with
+[`pypi-attestations`](https://github.com/trailofbits/pypi-attestations):
+
+```sh
+uvx pypi-attestations verify pypi --repository https://github.com/groupbees/pollen \
+  pypi:pollen_skills-0.6.0.tar.gz
+```
 
 See [Python](/guides/python/) for the API.
