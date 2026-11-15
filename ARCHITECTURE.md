@@ -57,7 +57,10 @@ to a module under [pollen/src/](pollen/src/), except the last.
   the skill directories themselves, so discovery has no part in it.
 - **[http](pollen/src/http.rs)** — the HTTP client of `well-known` sources. It
   follows redirects itself, so the decision to attach a token is taken again
-  on every hop, and it bounds every body it reads.
+  on every hop, and it bounds every body it reads. A connect timeout and a
+  read-inactivity timeout stop a stalled server from hanging a run, with no
+  total timeout so a slow, healthy download of a large artifact completes;
+  its messages never carry a URL's query string.
 - **[credentials](pollen/src/credentials.rs)** — reads the user-level
   credentials file and turns an origin into a bearer token: by running the
   helper command the file names, at most once per run, or by reading the

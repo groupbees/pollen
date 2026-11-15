@@ -111,6 +111,15 @@ credentials:
 - `validate --config-only`, which the pre-commit hook runs, fetches nothing
   and never runs a helper.
 
+## Unresponsive servers
+
+pollen waits at most 10 seconds for a connection to open, and 30 seconds
+without receiving any data, whether it waits for the response or for the next
+part of an artifact. It then fails, naming the URL without its query string,
+so a presigned signature never reaches the terminal. There is no limit on the
+total download time: a large artifact on a slow link is not cut while data
+keeps arriving. The values are fixed.
+
 ## What changes in the deployed skill
 
 pollen copies regular files only. A link inside an archive is left out, and
