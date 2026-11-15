@@ -74,6 +74,12 @@ jobs:
       - name: run the test suite
         run: cargo test --all-targets --locked
 
+  # The release builds, so a target that stops building fails here rather
+  # than on the tag.
+  binaries:
+    name: binaries
+    uses: ./.github/workflows/binaries.yaml
+
   python:
     name: python (${{ matrix.runner }}, ${{ matrix.python }})
     strategy:

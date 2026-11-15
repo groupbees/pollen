@@ -38,65 +38,9 @@ jobs:
     name: binaries
     needs:
       - version
-    strategy:
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-          - runner: macos-15
-            target: aarch64-apple-darwin
-          - runner: macos-15
-            target: x86_64-apple-darwin
-          - runner: windows-2025
-            target: x86_64-pc-windows-msvc
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-    env:
-      TARGET: ${{ matrix.target }}
-      ARCHIVE: pollen-${{ matrix.target }}-v${{ needs.version.outputs.version }}
-      BINARY: pollen${{ endsWith(matrix.target, '-windows-msvc') && '.exe' || '' }}
-      FORMAT: ${{ endsWith(matrix.target, '-windows-msvc') && 'zip' || 'tar.gz' }}
-    steps:
-      - name: check out the repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-
-      - name: install the pinned toolchain
-        run: |
-          rustup show active-toolchain || rustup toolchain install
-          rustup target add "$TARGET"
-
-      - name: build the release binary
-        run: cargo build --release --locked --target "$TARGET"
-
-      # The x86_64 macOS binary is cross-built on Apple Silicon and runs here
-      # under Rosetta 2, which the macos-15 image ships.
-      - name: check that the binary runs
-        run: '"target/${TARGET}/release/${BINARY}" --version'
-
-      - name: package the archive
-        run: |
-          mkdir "$ARCHIVE"
-          cp "target/${TARGET}/release/${BINARY}" LICENSE README.md "$ARCHIVE/"
-          if [ "$FORMAT" = zip ]; then
-            # Git Bash's GNU tar cannot write a zip; the bsdtar Windows ships can.
-            "$(cygpath "$SYSTEMROOT")/System32/tar.exe" -a -cf "${ARCHIVE}.zip" "$ARCHIVE"
-          else
-            # BSD tar on macOS otherwise adds AppleDouble `._*` entries.
-            COPYFILE_DISABLE=1 tar -czf "${ARCHIVE}.tar.gz" "$ARCHIVE"
-          fi
-
-      - name: keep the archive for the release job
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: ${{ env.ARCHIVE }}
-          path: ${{ env.ARCHIVE }}.${{ env.FORMAT }}
-          if-no-files-found: error
+    uses: ./.github/workflows/binaries.yaml
+    with:
+      version: ${{ needs.version.outputs.version }}
 
   sbom:
     name: sbom
