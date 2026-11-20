@@ -1,0 +1,66 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Europe/Paris",
+  "schedule": ["before 9am on monday"],
+  "dependencyDashboard": {
+    "enabled": true,
+    "title": "Dependency dashboard"
+  },
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 0,
+  "minimumReleaseAge": "3 days",
+  "labels": ["dependencies"],
+  "semanticCommits": "disabled",
+  "pre-commit": {
+    "enabled": true
+  },
+  "vulnerabilityAlerts": {
+    "labels": ["dependencies", "security"]
+  },
+  "packageRules": [
+    {
+      "description": "Minor and patch bumps of the Rust crates land as one PR; each major gets its own",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Rust crates (minor and patch)"
+    },
+    {
+      "description": "Minor and patch bumps of the Python bindings' dependencies land as one PR; each major gets its own",
+      "matchManagers": ["pep621"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Python packages (minor and patch)"
+    },
+    {
+      "description": "Minor and patch bumps of the documentation site's npm packages land as one PR; each major gets its own",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "documentation site npm packages (minor and patch)"
+    },
+    {
+      "description": "Minor and patch bumps of the GitHub Actions land as one PR; each major gets its own",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "GitHub Actions (minor and patch)"
+    },
+    {
+      "description": "Minor and patch bumps of the pre-commit hooks land as one PR; each major gets its own",
+      "matchManagers": ["pre-commit"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "pre-commit hooks (minor and patch)"
+    },
+    {
+      "description": "src/base-links.ts must build against the satteri that @astrojs/markdown-satteri uses, and Starlight and its plugins pin satteri too: one member bumped alone fails astro check on two copies",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["astro", "@astrojs/*", "satteri", "starlight-*"],
+      "groupName": "astro"
+    },
+    {
+      "description": "@astrojs/check accepts TypeScript ^5 || ^6 only; a newer major fails npm ci",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ]
+}
