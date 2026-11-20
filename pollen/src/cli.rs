@@ -64,7 +64,8 @@ pub struct Options {
     ///
     /// Reads `$XDG_CONFIG_HOME/pollen/pollen.yaml` (`~/.config/pollen/pollen.yaml`
     /// when unset, `%APPDATA%\pollen\pollen.yaml` on Windows); when it sets no
-    /// `targets`, the skills go to `~/.claude/skills` and `~/.agents/skills`.
+    /// `targets`, its `clients` deploy under the home directory, into
+    /// `~/.claude/skills` and `~/.agents/skills` by default.
     #[arg(
         long,
         short = 'g',
@@ -74,7 +75,7 @@ pub struct Options {
     )]
     pub global: bool,
 
-    /// Directory to deploy into, overriding the config's `targets`.
+    /// Directory to deploy into, overriding the config's `targets` and `clients`.
     ///
     /// Repeat the flag for several directories. The environment variable
     /// takes a list separated like `PATH`: `;` on Windows, `:` elsewhere.
@@ -127,16 +128,6 @@ impl Options {
             crate::config::global_config_path()
         } else {
             self.config.clone()
-        }
-    }
-
-    /// Where skills land when neither the CLI nor the config names a target.
-    #[must_use]
-    pub fn default_targets(&self) -> &'static [&'static str] {
-        if self.global {
-            &crate::config::GLOBAL_DEFAULT_TARGETS
-        } else {
-            &crate::config::DEFAULT_TARGETS
         }
     }
 
@@ -415,14 +406,11 @@ mod tests {
     }
 
     #[test]
-    fn global_reads_the_user_level_config_and_targets() {
+    fn global_reads_the_user_level_config() {
         let options = Cli::parse_from(["pollen", "--global", "update"]).options;
 
+        assert!(options.global);
         assert_eq!(options.config_path(), crate::config::global_config_path());
-        assert_eq!(
-            options.default_targets(),
-            crate::config::GLOBAL_DEFAULT_TARGETS
-        );
     }
 
     #[test]

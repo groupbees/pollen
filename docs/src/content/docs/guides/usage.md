@@ -128,7 +128,8 @@ pollen update --global
 `--global` (`-g`) reads `$XDG_CONFIG_HOME/pollen/pollen.yaml` —
 `~/.config/pollen/pollen.yaml` when the variable is unset, on macOS too, and
 `%APPDATA%\pollen\pollen.yaml` on Windows — and, when that file sets no
-`targets`, deploys into `~/.claude/skills` and `~/.agents/skills`. It works
+`targets`, deploys into its `clients`' skill directories under the home
+directory: `~/.claude/skills` and `~/.agents/skills` by default. It works
 with every command (`pollen list -g`, `pollen validate -g`) and cannot be
 combined with `--config`.
 

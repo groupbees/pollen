@@ -71,7 +71,7 @@ work like the CLI's global flags:
 | --- | --- | --- |
 | `config` | `--config` | `pollen.yaml`, from the working directory |
 | `global_` | `--global` | `False`; cannot be combined with `config` |
-| `targets` | `--target` | the config's `targets` |
+| `targets` | `--target` | the config's `targets`, else its `clients`' directories |
 | `cache_dir` | `--cache-dir` | the user cache directory |
 | `offline` | `--offline` | `False` |
 | `credentials_file` | `--credentials-file` | the user-level credentials file, which may be absent; taken by `update`, `validate`, `outdated` and `autoupdate` |

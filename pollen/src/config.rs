@@ -10,32 +10,34 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 
-/// Where skills land when neither the CLI nor the config says otherwise.
-///
-/// Claude Code reads the first; the second is the cross-client convention
-/// every other Agent Skills client scans, so one deployment serves both.
-pub const DEFAULT_TARGETS: [&str; 2] = [".claude/skills", ".agents/skills"];
-
-/// Where skills land with `--global` when neither the CLI nor the config says
-/// otherwise: the same pair, in the user's home.
-pub const GLOBAL_DEFAULT_TARGETS: [&str; 2] = ["~/.claude/skills", "~/.agents/skills"];
-
 /// The sentinel `repo:` value meaning "paths are relative to this config file".
 pub const LOCAL_REPO: &str = "local";
 
 /// A parsed and validated `pollen.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(title = "pollen configuration")]
+#[validate(schema(function = check_target_keys, skip_on_field_errors = true))]
+#[schemars(
+    title = "pollen configuration",
+    extend("not" = serde_json::json!({"required": ["targets", "clients"]}))
+)]
 pub struct Config {
     /// Directories the skills are deployed into, each getting a full copy.
     ///
     /// A relative path resolves against the working directory, and a leading
-    /// `~` is expanded. Defaults to `.claude/skills` and `.agents/skills`, or
-    /// to `~/.claude/skills` and `~/.agents/skills` with `--global`.
+    /// `~` is expanded. Forbidden with `clients`.
     #[validate(length(min = 1, message = "at least one target is required"))]
     #[schemars(length(min = 1))]
     pub targets: Option<Vec<PathBuf>>,
+    /// The clients the skills are deployed for, each through its own skill
+    /// directory: `all`, or a list of `claude` (`.claude/skills`) and
+    /// `agent-skills` (`.agents/skills`).
+    ///
+    /// The directories are under the home directory with `--global`.
+    /// Defaults to `all`. Forbidden with `targets`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(function = check_clients))]
+    pub clients: Option<Clients>,
     /// The sources to pull skills from.
     #[validate(length(min = 1, message = "at least one repo is required"), nested)]
     #[schemars(length(min = 1))]
@@ -47,6 +49,38 @@ pub struct Config {
     /// target it deploys into. Empty for a config not read from a file.
     #[serde(skip)]
     pub file: PathBuf,
+}
+
+/// An Agent Skills client, named by the skill directory it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum Client {
+    /// Claude Code, which reads `.claude/skills`.
+    Claude,
+    /// The cross-client convention every other Agent Skills client scans:
+    /// `.agents/skills`.
+    AgentSkills,
+}
+
+/// The clients a config deploys for.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(
+    untagged,
+    expecting = "`clients` takes `all`, or a list of `claude` and `agent-skills`"
+)]
+pub enum Clients {
+    /// Every client pollen knows.
+    All(AllClients),
+    /// Only these clients.
+    Only(#[schemars(length(min = 1))] Vec<Client>),
+}
+
+/// The `all` keyword of [`Clients`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum AllClients {
+    /// Every client pollen knows.
+    All,
 }
 
 /// One source of skills: a git repository, the config file's own directory,
@@ -186,7 +220,10 @@ impl Config {
             anyhow!(
                 "{} is invalid: {}",
                 path.display(),
-                errors.to_string().replace(".__all__", "")
+                errors
+                    .to_string()
+                    .replace(".__all__", "")
+                    .replace("__all__: ", "")
             )
         })?;
         config.base_dir = path
@@ -220,17 +257,23 @@ impl Config {
     }
 
     /// The directories to deploy into: the CLI overrides, else the config's
-    /// `targets`, else `defaults`.
+    /// `targets`, else the skill directories of its `clients` — in the
+    /// working directory, or in the home directory when `global`.
     ///
     /// Duplicates are dropped so a directory named twice is written once.
     #[must_use]
-    pub fn targets(&self, overrides: &[PathBuf], defaults: &[&str]) -> Vec<PathBuf> {
-        let chosen = if overrides.is_empty() {
-            self.targets
-                .clone()
-                .unwrap_or_else(|| defaults.iter().map(PathBuf::from).collect())
-        } else {
+    pub fn targets(&self, overrides: &[PathBuf], global: bool) -> Vec<PathBuf> {
+        let chosen = if !overrides.is_empty() {
             overrides.to_vec()
+        } else if let Some(targets) = &self.targets {
+            targets.clone()
+        } else {
+            self.clients
+                .as_ref()
+                .map_or(&Client::ALL[..], Clients::list)
+                .iter()
+                .map(|client| client.dir(global))
+                .collect()
         };
 
         let mut seen = BTreeSet::new();
@@ -239,6 +282,34 @@ impl Config {
             .map(|target| expand_home(target))
             .filter(|target| seen.insert(target.clone()))
             .collect()
+    }
+}
+
+impl Client {
+    /// Every client pollen knows, in deployment order.
+    pub const ALL: [Self; 2] = [Self::Claude, Self::AgentSkills];
+
+    fn dir(self, global: bool) -> PathBuf {
+        let dir = match self {
+            Self::Claude => ".claude/skills",
+            Self::AgentSkills => ".agents/skills",
+        };
+        if global {
+            PathBuf::from(format!("~/{dir}"))
+        } else {
+            PathBuf::from(dir)
+        }
+    }
+}
+
+impl Clients {
+    /// The clients this value names.
+    #[must_use]
+    pub fn list(&self) -> &[Client] {
+        match self {
+            Self::All(_) => &Client::ALL,
+            Self::Only(clients) => clients,
+        }
     }
 }
 
@@ -402,6 +473,23 @@ pub fn default_credentials_path() -> PathBuf {
     )
     .join("pollen")
     .join("credentials.yaml")
+}
+
+fn check_target_keys(config: &Config) -> Result<(), ValidationError> {
+    if config.targets.is_some() && config.clients.is_some() {
+        return Err(named_error(
+            "clients",
+            "set either `targets` (directories) or `clients` (their default skill directories), not both",
+        ));
+    }
+    Ok(())
+}
+
+fn check_clients(clients: &Clients) -> Result<(), ValidationError> {
+    if clients.list().is_empty() {
+        return Err(named_error("clients", "at least one client is required"));
+    }
+    Ok(())
 }
 
 fn check_source_keys(repo: &RepoSpec) -> Result<(), ValidationError> {
@@ -655,7 +743,7 @@ mod tests {
         let config = parse("repos:\n  - repo: local\n    paths:\n      - path: .\n").unwrap();
 
         assert_eq!(
-            config.targets(&[], &DEFAULT_TARGETS),
+            config.targets(&[], false),
             [
                 PathBuf::from(".claude/skills"),
                 PathBuf::from(".agents/skills")
@@ -671,13 +759,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            config.targets(&[PathBuf::from("/tmp/override")], &DEFAULT_TARGETS),
+            config.targets(&[PathBuf::from("/tmp/override")], false),
             [PathBuf::from("/tmp/override")]
         );
-        assert_eq!(
-            config.targets(&[], &DEFAULT_TARGETS),
-            [PathBuf::from("/opt/skills")]
-        );
+        assert_eq!(config.targets(&[], false), [PathBuf::from("/opt/skills")]);
     }
 
     #[test]
@@ -686,7 +771,7 @@ mod tests {
         let home = dirs::home_dir().unwrap();
 
         assert_eq!(
-            config.targets(&[], &GLOBAL_DEFAULT_TARGETS),
+            config.targets(&[], true),
             [home.join(".claude/skills"), home.join(".agents/skills")]
         );
     }
@@ -871,10 +956,76 @@ mod tests {
         let config = parse("repos:\n  - repo: local\n    paths:\n      - path: .\n").unwrap();
         let repeated = vec![PathBuf::from("skills"), PathBuf::from("skills")];
 
+        assert_eq!(config.targets(&repeated, false), [PathBuf::from("skills")]);
+    }
+
+    #[test]
+    fn clients_select_their_skill_directories() {
+        for (clients, expected) in [
+            ("all", vec![".claude/skills", ".agents/skills"]),
+            ("[claude]", vec![".claude/skills"]),
+            ("[agent-skills]", vec![".agents/skills"]),
+            (
+                "[agent-skills, claude, agent-skills]",
+                vec![".agents/skills", ".claude/skills"],
+            ),
+        ] {
+            let config = parse(&format!(
+                "clients: {clients}\nrepos:\n  - repo: local\n    paths:\n      - path: .\n"
+            ))
+            .unwrap();
+
+            assert_eq!(
+                config.targets(&[], false),
+                expected.iter().map(PathBuf::from).collect::<Vec<_>>(),
+                "{clients}"
+            );
+        }
+    }
+
+    #[test]
+    fn global_clients_select_the_home_skill_directories() {
+        let config =
+            parse("clients: [claude]\nrepos:\n  - repo: local\n    paths:\n      - path: .\n")
+                .unwrap();
+        let home = dirs::home_dir().unwrap();
+
+        assert_eq!(config.targets(&[], true), [home.join(".claude/skills")]);
+    }
+
+    #[test]
+    fn the_cli_overrides_win_over_clients() {
+        let config =
+            parse("clients: [claude]\nrepos:\n  - repo: local\n    paths:\n      - path: .\n")
+                .unwrap();
+
         assert_eq!(
-            config.targets(&repeated, &DEFAULT_TARGETS),
-            [PathBuf::from("skills")]
+            config.targets(&[PathBuf::from("/tmp/override")], false),
+            [PathBuf::from("/tmp/override")]
         );
+    }
+
+    #[test]
+    fn rejects_targets_with_clients() {
+        let error = parse(
+            "targets: [skills]\nclients: all\nrepos:\n  - repo: local\n    paths:\n      - path: .\n",
+        )
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("not both"), "{error:#}");
+    }
+
+    #[test]
+    fn rejects_an_empty_or_unknown_client_list() {
+        for clients in ["[]", "[cursor]", "claude", "everything"] {
+            assert!(
+                parse(&format!(
+                    "clients: {clients}\nrepos:\n  - repo: local\n    paths:\n      - path: .\n"
+                ))
+                .is_err(),
+                "{clients}"
+            );
+        }
     }
 
     #[test]

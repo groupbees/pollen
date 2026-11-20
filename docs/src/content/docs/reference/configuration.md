@@ -30,7 +30,8 @@ directory, or a `well-known` origin.
 
 | Key | Required | Default | Description |
 | --- | --- | --- | --- |
-| `targets` | no | `.claude/skills` and `.agents/skills`; with `--global`, `~/.claude/skills` and `~/.agents/skills` | Directories the skills are deployed into, each getting a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. |
+| `clients` | no | `all` | The clients the skills are deployed for: `all`, or a list of `claude` (`.claude/skills`) and `agent-skills` (`.agents/skills`, the directory every other Agent Skills client scans). The directories are in the working directory, or in the home directory with `--global`. Forbidden with `targets`. |
+| `targets` | no | — | Directories the skills are deployed into, instead of the `clients`' ones; each gets a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. Forbidden with `clients`. |
 | `repos[].repo` | unless `well-known` | — | A git URL, a path to a git repository, or `local` for the directory holding the config file. |
 | `repos[].revision` | for git | — | Tag, branch or commit to check out. A branch draws a warning, since each update deploys whatever it points to then; a full commit SHA is the only revision that cannot move (`pollen validate --pinned` enforces it). Forbidden on `local` and `well-known`. |
 | `repos[].paths[].path` | with `repo` | — | Directory to search, relative to the source root. Write it with `/`, which every platform reads. Forbidden on `well-known`. |
@@ -53,14 +54,20 @@ resolution. A child directory symlink resolving outside the root refuses the run
 Links within the root retain their selected name and path. Excluded candidates
 are not selected and do not enter this check.
 
-Set `targets` yourself to deploy elsewhere — a single directory, or the
-user-level pair, which is also what `--global` uses when the user-level config
-sets none:
+By default the skills go to both `.claude/skills` and `.agents/skills`. Set
+`clients` to deploy for some of them only — Claude Code alone, here, in the
+project or under the home directory with `--global`:
+
+```yaml
+clients:
+  - claude
+```
+
+Set `targets` instead to deploy into directories of your own:
 
 ```yaml
 targets:
-  - ~/.claude/skills
-  - ~/.agents/skills
+  - ~/team/skills
 ```
 
 A

@@ -38,6 +38,9 @@ git host accepts; public ones work over HTTPS as is.
 | Project | `pollen.yaml` at the project root, committed | `pollen update` | `.claude/skills/` + `.agents/skills/` — gitignore both |
 | Machine | `~/.config/pollen/pollen.yaml` (`$XDG_CONFIG_HOME`) | `pollen update -g` | `~/.claude/skills/` + `~/.agents/skills/` |
 
+`clients: [claude]` (or `[agent-skills]`; default `all`) deploys into one of
+the pair only; `targets: [<dir>, …]` names other directories instead.
+
 One config per target directory: an update removes whatever its config does
 not declare, so pollen refuses a directory another config manages. Add sources
 to that config; `--force` only to hand the directory over on purpose.

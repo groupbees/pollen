@@ -395,6 +395,7 @@ mod tests {
     fn config_with(repo_count: usize) -> Config {
         Config {
             targets: None,
+            clients: None,
             repos: (0..repo_count)
                 .map(|index| RepoSpec {
                     repo: Some(format!("https://example.invalid/{index}.git")),
