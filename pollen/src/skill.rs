@@ -101,12 +101,16 @@ pub struct Frontmatter {
 
 /// Read and validate the skill stored in `dir`.
 ///
+/// With `allow_hidden_characters`, a file holding an invisible character is
+/// logged as a warning instead of refusing the skill.
+///
 /// # Errors
 ///
 /// When the directory holds no `SKILL.md`, its frontmatter is missing,
 /// unparseable, or outside the Agent Skills specification, or one of its
-/// text files holds an invisible character.
-pub fn load(dir: &Path) -> Result<Frontmatter, SkillError> {
+/// text files holds an invisible character and `allow_hidden_characters` is
+/// not set.
+pub fn load(dir: &Path, allow_hidden_characters: bool) -> Result<Frontmatter, SkillError> {
     let manifest = dir.join(SKILL_FILE);
     if !manifest.is_file() {
         return Err(SkillError::NotASkill {
@@ -142,7 +146,7 @@ pub fn load(dir: &Path) -> Result<Frontmatter, SkillError> {
         });
     }
 
-    reject_hidden_characters(dir)?;
+    check_hidden_characters(dir, allow_hidden_characters)?;
 
     for (key, value) in &frontmatter.metadata {
         if !value.is_string() {
@@ -157,9 +161,10 @@ pub fn load(dir: &Path) -> Result<Frontmatter, SkillError> {
     Ok(frontmatter)
 }
 
-/// Refuse the first file whose text holds an invisible character. A file that
-/// is not UTF-8 is binary to an agent too, and is left alone.
-fn reject_hidden_characters(dir: &Path) -> Result<(), SkillError> {
+/// Refuse the first file whose text holds an invisible character, or warn
+/// about each one when they are allowed. A file that is not UTF-8 is binary
+/// to an agent too, and is left alone.
+fn check_hidden_characters(dir: &Path, allow: bool) -> Result<(), SkillError> {
     let walk = WalkDir::new(dir)
         .sort_by_file_name()
         .into_iter()
@@ -186,14 +191,19 @@ fn reject_hidden_characters(dir: &Path) -> Result<(), SkillError> {
             continue;
         };
         let found = hidden::find(text);
-        if let Some(&first) = found.first() {
-            return Err(SkillError::HiddenCharacters {
-                path: dir.to_path_buf(),
-                file,
-                count: found.len(),
-                first,
-            });
+        let Some(&first) = found.first() else {
+            continue;
+        };
+        let error = SkillError::HiddenCharacters {
+            path: dir.to_path_buf(),
+            file,
+            count: found.len(),
+            first,
+        };
+        if !allow {
+            return Err(error);
         }
+        tracing::warn!("{error}; kept, since invisible characters are allowed");
     }
     Ok(())
 }
@@ -259,7 +269,7 @@ mod tests {
     fn the_skill_pollen_ships_satisfies_the_specification() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../skills/pollen");
 
-        assert_eq!(load(&dir).unwrap().name, "pollen");
+        assert_eq!(load(&dir, false).unwrap().name, "pollen");
     }
 
     #[test]
@@ -271,7 +281,7 @@ mod tests {
             "---\nname: pdf-processing\ndescription: Extract text from PDFs.\n---\n\nBody.\n",
         );
 
-        let frontmatter = load(&dir).unwrap();
+        let frontmatter = load(&dir, false).unwrap();
 
         assert_eq!(frontmatter.name, "pdf-processing");
         assert_eq!(frontmatter.description, "Extract text from PDFs.");
@@ -286,7 +296,7 @@ mod tests {
             "---\nname: deploy\ndescription: Ship it.\nmodel: opus\ndisable-model-invocation: true\n---\n",
         );
 
-        assert!(load(&dir).is_ok());
+        assert!(load(&dir, false).is_ok());
     }
 
     #[test]
@@ -298,7 +308,10 @@ mod tests {
             "---\nname: ship\ndescription: Ship it.\n---\n",
         );
 
-        assert!(matches!(load(&dir), Err(SkillError::NameMismatch { .. })));
+        assert!(matches!(
+            load(&dir, false),
+            Err(SkillError::NameMismatch { .. })
+        ));
     }
 
     #[test]
@@ -310,7 +323,7 @@ mod tests {
             "---\nname: PDF--Processing\ndescription: Nope.\n---\n",
         );
 
-        assert!(matches!(load(&dir), Err(SkillError::Invalid { .. })));
+        assert!(matches!(load(&dir, false), Err(SkillError::Invalid { .. })));
     }
 
     #[test]
@@ -322,7 +335,7 @@ mod tests {
             "---\nname: deploy\ndescription: \"\"\n---\n",
         );
 
-        assert!(matches!(load(&dir), Err(SkillError::Invalid { .. })));
+        assert!(matches!(load(&dir, false), Err(SkillError::Invalid { .. })));
     }
 
     #[test]
@@ -330,7 +343,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let dir = write_skill(root.path(), "deploy", "# Just markdown\n");
 
-        assert!(matches!(load(&dir), Err(SkillError::NoFrontmatter { .. })));
+        assert!(matches!(
+            load(&dir, false),
+            Err(SkillError::NoFrontmatter { .. })
+        ));
     }
 
     #[test]
@@ -339,7 +355,7 @@ mod tests {
         std::fs::create_dir_all(root.path().join("empty")).unwrap();
 
         assert!(matches!(
-            load(&root.path().join("empty")),
+            load(&root.path().join("empty"), false),
             Err(SkillError::NotASkill { .. })
         ));
     }
@@ -353,7 +369,7 @@ mod tests {
             "---\nname: deploy\ndescription: Ship it.\n---\n\nShip\u{200b}\u{200b} it.\n",
         );
 
-        let error = load(&dir).unwrap_err();
+        let error = load(&dir, false).unwrap_err();
 
         assert!(
             matches!(
@@ -376,7 +392,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("references")).unwrap();
         std::fs::write(dir.join("references/guide.md"), "Read \u{202e}me\n").unwrap();
 
-        let error = load(&dir).unwrap_err().to_string();
+        let error = load(&dir, false).unwrap_err().to_string();
 
         assert!(
             error.ends_with(
@@ -384,6 +400,18 @@ mod tests {
             ),
             "{error}"
         );
+    }
+
+    #[test]
+    fn keeps_a_skill_hiding_characters_when_they_are_allowed() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = write_skill(
+            root.path(),
+            "deploy",
+            "---\nname: deploy\ndescription: Ship it.\n---\n\nShip\u{200b} it.\n",
+        );
+
+        assert_eq!(load(&dir, true).unwrap().name, "deploy");
     }
 
     #[test]
@@ -400,7 +428,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(load(&dir).is_ok());
+        assert!(load(&dir, false).is_ok());
     }
 
     #[test]
@@ -419,7 +447,7 @@ mod tests {
             "\u{feff}---\r\nname: deploy\r\ndescription: Ship it.\r\n---\r\n\r\nBody.\r\n",
         );
 
-        let frontmatter = load(&dir).unwrap();
+        let frontmatter = load(&dir, false).unwrap();
 
         assert_eq!(frontmatter.name, "deploy");
         assert_eq!(frontmatter.description, "Ship it.");

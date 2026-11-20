@@ -163,8 +163,16 @@ impl fmt::Display for Report {
 /// # Errors
 ///
 /// When the config cannot be loaded, or the update itself fails.
-pub async fn run(options: &Options, dry_run: bool, force: bool) -> Result<()> {
-    print!("{}", report(options, dry_run, force).await?);
+pub async fn run(
+    options: &Options,
+    dry_run: bool,
+    force: bool,
+    allow_hidden_characters: bool,
+) -> Result<()> {
+    print!(
+        "{}",
+        report(options, dry_run, force, allow_hidden_characters).await?
+    );
     Ok(())
 }
 
@@ -173,10 +181,23 @@ pub async fn run(options: &Options, dry_run: bool, force: bool) -> Result<()> {
 /// # Errors
 ///
 /// When the config cannot be loaded, or the update itself fails.
-pub async fn report(options: &Options, dry_run: bool, force: bool) -> Result<Report> {
+pub async fn report(
+    options: &Options,
+    dry_run: bool,
+    force: bool,
+    allow_hidden_characters: bool,
+) -> Result<Report> {
     let context = Context::open(options)?;
     let fetcher = context.fetcher(options);
-    update(&context.config, &context.targets, &fetcher, dry_run, force).await
+    update(
+        &context.config,
+        &context.targets,
+        &fetcher,
+        dry_run,
+        force,
+        allow_hidden_characters,
+    )
+    .await
 }
 
 /// Bring every directory in `targets` in line with `config`.
@@ -194,8 +215,9 @@ pub async fn update(
     materializer: &impl Materializer,
     dry_run: bool,
     force: bool,
+    allow_hidden_characters: bool,
 ) -> Result<Report> {
-    let plan = plan::build(config, materializer).await?;
+    let plan = plan::build(config, materializer, allow_hidden_characters).await?;
     if !plan.problems.is_empty() {
         for problem in &plan.problems {
             tracing::error!("{problem}");
@@ -443,10 +465,10 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        let first = update(&config, &one(target.path()), &mock, false, false)
+        let first = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
-        let second = update(&config, &one(target.path()), &mock, false, false)
+        let second = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
 
@@ -469,11 +491,11 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        update(&config, &one(target.path()), &mock, false, false)
+        update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
         write_skill(source.path(), "demo", "A better demo skill.");
-        let summary = update(&config, &one(target.path()), &mock, false, false)
+        let summary = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
 
@@ -493,11 +515,11 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        update(&config, &one(target.path()), &mock, false, false)
+        update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
         std::fs::write(target.path().join("demo/SKILL.md"), "tampered").unwrap();
-        let summary = update(&config, &one(target.path()), &mock, false, false)
+        let summary = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
 
@@ -513,11 +535,11 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        update(&config, &one(target.path()), &mock, false, false)
+        update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
         std::fs::remove_dir_all(source.path().join("skills/gone")).unwrap();
-        let summary = update(&config, &one(target.path()), &mock, false, false)
+        let summary = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
 
@@ -539,7 +561,7 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        let error = update(&config, &one(target.path()), &mock, false, false)
+        let error = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap_err()
             .to_string();
@@ -591,7 +613,7 @@ mod tests {
 
         for dry_run in [false, true] {
             for force in [false, true] {
-                let result = update(&config, &one(&target), &mock, dry_run, force).await;
+                let result = update(&config, &one(&target), &mock, dry_run, force, false).await;
 
                 assert!(result.is_err(), "unsafe state must refuse before mutation");
                 assert_eq!(
@@ -629,7 +651,7 @@ mod tests {
         let config = config_owned_by(configs.path(), "a.yaml");
         let mock = materializer(source.path());
 
-        update(&config, &one(target.path()), &mock, false, false)
+        update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
 
@@ -649,10 +671,10 @@ mod tests {
         let second = config_owned_by(configs.path(), "b.yaml");
         let mock = materializer(source.path());
 
-        update(&first, &one(target.path()), &mock, false, false)
+        update(&first, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
-        let error = update(&second, &one(target.path()), &mock, false, false)
+        let error = update(&second, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap_err()
             .to_string();
@@ -671,10 +693,10 @@ mod tests {
         let second = config_owned_by(configs.path(), "b.yaml");
         let mock = materializer(source.path());
 
-        update(&first, &one(target.path()), &mock, false, false)
+        update(&first, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
-        update(&second, &one(target.path()), &mock, false, true)
+        update(&second, &one(target.path()), &mock, false, true, false)
             .await
             .unwrap();
 
@@ -694,11 +716,11 @@ mod tests {
         let current = config_owned_by(configs.path(), "new.yaml");
         let mock = materializer(source.path());
 
-        update(&moved, &one(target.path()), &mock, false, false)
+        update(&moved, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
         std::fs::remove_file(&moved.file).unwrap();
-        let summary = update(&current, &one(target.path()), &mock, false, false)
+        let summary = update(&current, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
 
@@ -717,14 +739,14 @@ mod tests {
         write_skill(source.path(), "demo", "A demo skill.");
         let config = config_owned_by(configs.path(), "a.yaml");
         let mock = materializer(source.path());
-        update(&config, &one(target.path()), &mock, false, false)
+        update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
         let mut legacy = State::load(target.path()).unwrap();
         legacy.config = None;
         legacy.save(target.path()).unwrap();
 
-        let summary = update(&config, &one(target.path()), &mock, false, false)
+        let summary = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
 
@@ -746,12 +768,12 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        update(&config, &one(target.path()), &mock, false, false)
+        update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap_err();
         let recorded = State::load(target.path()).unwrap();
         std::fs::remove_dir_all(target.path().join("beta")).unwrap();
-        let retry = update(&config, &one(target.path()), &mock, false, false)
+        let retry = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap();
 
@@ -773,7 +795,7 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        let summary = update(&config, &one(target.path()), &mock, false, true)
+        let summary = update(&config, &one(target.path()), &mock, false, true, false)
             .await
             .unwrap();
 
@@ -793,7 +815,7 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        let summary = update(&config, &one(target.path()), &mock, true, false)
+        let summary = update(&config, &one(target.path()), &mock, true, false, false)
             .await
             .unwrap();
 
@@ -811,7 +833,7 @@ mod tests {
         let config = config_with(2);
         let mock = materializer(source.path());
 
-        let error = update(&config, &one(target.path()), &mock, false, false)
+        let error = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap_err()
             .to_string();
@@ -836,7 +858,7 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        let error = update(&config, &one(target.path()), &mock, false, false)
+        let error = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap_err()
             .to_string();
@@ -859,13 +881,18 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        let error = update(&config, &one(target.path()), &mock, false, false)
+        let error = update(&config, &one(target.path()), &mock, false, false, false)
             .await
             .unwrap_err()
             .to_string();
 
         assert!(error.contains("skill(s) are invalid"), "{error}");
         assert!(!target.path().join("demo").exists());
+
+        update(&config, &one(target.path()), &mock, false, false, true)
+            .await
+            .unwrap();
+        assert!(target.path().join("demo/SKILL.md").is_file());
     }
 
     #[tokio::test]
@@ -882,6 +909,7 @@ mod tests {
             &config,
             &[claude.clone(), agents.clone()],
             &mock,
+            false,
             false,
             false,
         )
@@ -906,10 +934,17 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        update(&config, std::slice::from_ref(&claude), &mock, false, false)
-            .await
-            .unwrap();
-        let report = update(&config, &[claude, agents], &mock, false, false)
+        update(
+            &config,
+            std::slice::from_ref(&claude),
+            &mock,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let report = update(&config, &[claude, agents], &mock, false, false, false)
             .await
             .unwrap();
 

@@ -27,6 +27,7 @@ def update(
     credentials_file: StrPath | None = None,
     dry_run: bool = False,
     force: bool = False,
+    allow_hidden_characters: bool = False,
 ) -> Report:
     """Install, refresh and prune the skills the config declares."""
 
@@ -50,6 +51,7 @@ def validate(
     credentials_file: StrPath | None = None,
     config_only: bool = False,
     pinned: bool = False,
+    allow_hidden_characters: bool = False,
 ) -> Validation:
     """Check the config and, unless `config_only`, every skill it selects."""
 

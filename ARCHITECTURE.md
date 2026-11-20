@@ -276,7 +276,11 @@ selectors, so they carry instructions nobody approved. Every UTF-8 file of
 the skill is checked, not only `SKILL.md`, since an agent reads its
 references and scripts too. Stripping them would deploy bytes the publisher
 never shipped, and break the digest a `well-known` skill is pinned to; a
-warning would deploy the injection anyway. The characters text needs are
+warning would deploy the injection anyway. `--allow-hidden-characters` on
+`update` and `validate` is the way past a false positive from a source the
+user trusts: one explicit flag, like `--force`, and every file it lets
+through still logs a warning. `exclude` stays the narrower choice when one
+skill is at fault. The characters text needs are
 told apart by position: a joiner between two non-ASCII characters (emoji
 sequences, Persian, Indic scripts), a presentation selector after a visible
 character (`⚠️`), a byte order mark opening a file.
@@ -313,6 +317,7 @@ digest. A second file would only repeat the config, and could disagree with it.
   keys refuse the target before installing, pruning or sweeping staging material.
 - A deployed skill's UTF-8 files hold no invisible character beyond the
   joiners, presentation selectors and opening byte order mark text needs.
+  `--allow-hidden-characters` is the single, explicit way past it.
 - An install becomes visible in one rename. There is no window in which the
   target holds a partially written skill.
 - A `well-known` artifact is used only once its SHA-256 matches the index,

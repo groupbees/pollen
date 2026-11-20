@@ -84,9 +84,9 @@ the arguments instead.
 
 | Function | CLI equivalent | Returns |
 | --- | --- | --- |
-| `update(dry_run=False, force=False)` | `pollen update` | `Report` |
+| `update(dry_run=False, force=False, allow_hidden_characters=False)` | `pollen update` | `Report` |
 | `list_installed()` | `pollen list` | `list[Deployed]`, one per target |
-| `validate(config_only=False, pinned=False)` | `pollen validate` | `Validation` |
+| `validate(config_only=False, pinned=False, allow_hidden_characters=False)` | `pollen validate` | `Validation` |
 | `outdated(min_release_age=None)` | `pollen outdated` | `list[SourceStatus \| DigestStatus]` |
 | `autoupdate(freeze=False, dry_run=False, min_release_age=None)` | `pollen autoupdate` | `AutoupdateOutcome` |
 | `show(repo, revision=None, path=None)` | `pollen show` | `Listing` |

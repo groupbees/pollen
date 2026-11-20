@@ -31,6 +31,11 @@ smuggles in instructions nobody approved, so `update`, `validate` and `show`
 refuse it, naming the file and where the first one sits. Emoji sequences,
 Persian or Indic joiners and a byte order mark opening a file are allowed.
 
+For a source you trust, `--allow-hidden-characters` makes `update` and
+`validate` accept such a skill, logging a warning for each file. The flag
+lowers the check for every source; when one skill is at fault, `exclude` it
+instead.
+
 A repository that publishes skills can run the same check in GitHub Actions
 with [groupbees/skill-action](https://github.com/groupbees/skill-action), which
 also lints every skill with

@@ -18,8 +18,7 @@ pub struct Validation {
     pub sources: usize,
     /// The skills its sources yield, `None` when only the file was checked.
     pub skills: Option<Vec<Planned>>,
-    /// The selected skills that break the Agent Skills specification, one
-    /// message each.
+    /// The selected skills that are invalid, one message each.
     pub problems: Vec<String>,
 }
 
@@ -32,12 +31,13 @@ pub struct Validation {
 /// # Errors
 ///
 /// When a config file is invalid, a source cannot be fetched, or a selected
-/// skill breaks the Agent Skills specification.
+/// skill is invalid.
 pub async fn run(
     options: &Options,
     configs: &[PathBuf],
     config_only: bool,
     pinned: bool,
+    allow_hidden_characters: bool,
 ) -> Result<()> {
     let paths: Vec<PathBuf> = if configs.is_empty() {
         vec![options.config_path()]
@@ -46,12 +46,12 @@ pub async fn run(
     };
 
     if let [only] = paths.as_slice() {
-        return report(&check(options, only, config_only, pinned).await?);
+        return report(&check(options, only, config_only, pinned, allow_hidden_characters).await?);
     }
 
     let mut failures = 0_usize;
     for path in &paths {
-        let outcome = check(options, path, config_only, pinned).await;
+        let outcome = check(options, path, config_only, pinned, allow_hidden_characters).await;
         if let Err(error) = outcome.and_then(|validation| report(&validation)) {
             tracing::error!("{error:#}");
             failures += 1;
@@ -81,6 +81,7 @@ pub async fn check(
     path: &Path,
     config_only: bool,
     pinned: bool,
+    allow_hidden_characters: bool,
 ) -> Result<Validation> {
     let context = Context::open_at(options, path)?;
 
@@ -110,9 +111,13 @@ pub async fn check(
         });
     }
 
-    let plan = plan::build(&context.config, &context.fetcher(options))
-        .await
-        .with_context(|| path.display().to_string())?;
+    let plan = plan::build(
+        &context.config,
+        &context.fetcher(options),
+        allow_hidden_characters,
+    )
+    .await
+    .with_context(|| path.display().to_string())?;
     Ok(Validation {
         path: path.to_owned(),
         sources,

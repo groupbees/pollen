@@ -94,6 +94,20 @@ def test_an_invalid_skill_raises_with_the_problem(workspace: Path, cache_dir: Pa
         pollen.validate(cache_dir=cache_dir)
 
 
+def test_a_skill_hiding_characters_passes_only_when_allowed(
+    workspace: Path, cache_dir: Path
+) -> None:
+    with (workspace / "local-skills" / "gamma" / "SKILL.md").open("a") as manifest:
+        manifest.write("Ship\u200b it.\n")
+
+    with pytest.raises(pollen.PollenError, match="invisible character"):
+        pollen.validate(cache_dir=cache_dir)
+    validation = pollen.validate(cache_dir=cache_dir, allow_hidden_characters=True)
+
+    assert validation.skills is not None
+    assert "gamma" in [skill.name for skill in validation.skills]
+
+
 def test_validate_pinned_refuses_a_tag(workspace: Path) -> None:
     with pytest.raises(pollen.PollenError, match="not pinned:"):
         pollen.validate(config_only=True, pinned=True)

@@ -93,7 +93,7 @@ async fn interrupted() -> PyErr {
 
 /// Install, refresh and prune the skills the config declares.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, credentials_file=None, dry_run=false, force=false))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, credentials_file=None, dry_run=false, force=false, allow_hidden_characters=false))]
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn update(
     py: Python<'_>,
@@ -105,6 +105,7 @@ fn update(
     credentials_file: Option<PathBuf>,
     dry_run: bool,
     force: bool,
+    allow_hidden_characters: bool,
 ) -> PyResult<Bound<'_, PyAny>> {
     let options = options(
         config,
@@ -114,7 +115,10 @@ fn update(
         offline,
         credentials_file,
     )?;
-    let report = block_on(py, command::update::report(&options, dry_run, force))?;
+    let report = block_on(
+        py,
+        command::update::report(&options, dry_run, force, allow_hidden_characters),
+    )?;
 
     let summaries = report
         .summaries
@@ -197,10 +201,9 @@ fn list_installed(
 
 /// Check the config and, unless `config_only`, every skill it selects.
 ///
-/// Raises `PollenError` when the config is invalid or a selected skill breaks
-/// the Agent Skills specification.
+/// Raises `PollenError` when the config is invalid or a selected skill is.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, credentials_file=None, config_only=false, pinned=false))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, credentials_file=None, config_only=false, pinned=false, allow_hidden_characters=false))]
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn validate(
     py: Python<'_>,
@@ -212,6 +215,7 @@ fn validate(
     credentials_file: Option<PathBuf>,
     config_only: bool,
     pinned: bool,
+    allow_hidden_characters: bool,
 ) -> PyResult<Bound<'_, PyAny>> {
     let options = options(
         config,
@@ -224,7 +228,13 @@ fn validate(
     let path = options.config_path();
     let validation = block_on(
         py,
-        command::validate::check(&options, &path, config_only, pinned),
+        command::validate::check(
+            &options,
+            &path,
+            config_only,
+            pinned,
+            allow_hidden_characters,
+        ),
     )?;
 
     if !validation.problems.is_empty() {
