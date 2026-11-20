@@ -8,6 +8,7 @@ use anyhow::{Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing_subscriber::EnvFilter;
 
+use crate::config::Client;
 use crate::{command, shutdown};
 
 /// What separates the directories of a list, as in `PATH`.
@@ -64,7 +65,8 @@ pub struct Options {
     ///
     /// Reads `$XDG_CONFIG_HOME/pollen/pollen.yaml` (`~/.config/pollen/pollen.yaml`
     /// when unset, `%APPDATA%\pollen\pollen.yaml` on Windows); when it sets no
-    /// `targets`, the skills go to `~/.claude/skills` and `~/.agents/skills`.
+    /// `targets`, its `clients` deploy under the home directory, into
+    /// `~/.claude/skills` and `~/.agents/skills` by default.
     #[arg(
         long,
         short = 'g',
@@ -74,7 +76,7 @@ pub struct Options {
     )]
     pub global: bool,
 
-    /// Directory to deploy into, overriding the config's `targets`.
+    /// Directory to deploy into, overriding the config's `targets` and `clients`.
     ///
     /// Repeat the flag for several directories. The environment variable
     /// takes a list separated like `PATH`: `;` on Windows, `:` elsewhere.
@@ -85,6 +87,20 @@ pub struct Options {
         global = true
     )]
     pub targets: Vec<PathBuf>,
+
+    /// Client to deploy for, overriding the config's `targets` and `clients`.
+    ///
+    /// Repeat the flag for several clients. The environment variable takes a
+    /// comma-separated list.
+    #[arg(
+        long = "client",
+        env = "POLLEN_CLIENTS",
+        value_enum,
+        value_delimiter = ',',
+        conflicts_with = "targets",
+        global = true
+    )]
+    pub clients: Vec<ClientChoice>,
 
     /// Directory holding the git checkouts pollen reuses between runs.
     #[arg(long, env = "POLLEN_CACHE_DIR", global = true)]
@@ -111,10 +127,40 @@ impl Default for Options {
             config: PathBuf::from(DEFAULT_CONFIG),
             global: false,
             targets: Vec::new(),
+            clients: Vec::new(),
             cache_dir: None,
             offline: false,
             credentials_file: None,
         }
+    }
+}
+
+/// A `--client` value: one client, or all of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ClientChoice {
+    /// Claude Code, into `.claude/skills`.
+    Claude,
+    /// Every other Agent Skills client, into `.agents/skills`.
+    AgentSkills,
+    /// Both.
+    All,
+}
+
+impl ClientChoice {
+    fn clients(self) -> &'static [Client] {
+        match self {
+            Self::Claude => &[Client::Claude],
+            Self::AgentSkills => &[Client::AgentSkills],
+            Self::All => &Client::ALL,
+        }
+    }
+}
+
+impl std::str::FromStr for ClientChoice {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        <Self as ValueEnum>::from_str(value, false)
     }
 }
 
@@ -130,14 +176,14 @@ impl Options {
         }
     }
 
-    /// Where skills land when neither the CLI nor the config names a target.
+    /// The clients `--client` names, empty when it is not given.
     #[must_use]
-    pub fn default_targets(&self) -> &'static [&'static str] {
-        if self.global {
-            &crate::config::GLOBAL_DEFAULT_TARGETS
-        } else {
-            &crate::config::DEFAULT_TARGETS
-        }
+    pub fn clients(&self) -> Vec<Client> {
+        self.clients
+            .iter()
+            .flat_map(|choice| choice.clients())
+            .copied()
+            .collect()
     }
 
     /// The credentials file: `--credentials-file` with `~` expanded, which
@@ -415,14 +461,11 @@ mod tests {
     }
 
     #[test]
-    fn global_reads_the_user_level_config_and_targets() {
+    fn global_reads_the_user_level_config() {
         let options = Cli::parse_from(["pollen", "--global", "update"]).options;
 
+        assert!(options.global);
         assert_eq!(options.config_path(), crate::config::global_config_path());
-        assert_eq!(
-            options.default_targets(),
-            crate::config::GLOBAL_DEFAULT_TARGETS
-        );
     }
 
     #[test]
@@ -481,6 +524,44 @@ mod tests {
             Command::Autoupdate { min_release_age, .. } if min_release_age == week
         ));
         assert!(Cli::try_parse_from(["pollen", "outdated", "--min-release-age", "7"]).is_err());
+    }
+
+    #[test]
+    fn clients_are_repeated_or_comma_separated_and_all_expands() {
+        let repeated = Cli::parse_from([
+            "pollen",
+            "--client",
+            "agent-skills",
+            "--client",
+            "claude",
+            "update",
+        ]);
+        let listed = Cli::parse_from(["pollen", "update", "--client", "agent-skills,claude"]);
+        let all = Cli::parse_from(["pollen", "update", "--client", "all"]);
+
+        assert_eq!(
+            repeated.options.clients(),
+            [Client::AgentSkills, Client::Claude]
+        );
+        assert_eq!(listed.options.clients(), repeated.options.clients());
+        assert_eq!(all.options.clients(), Client::ALL);
+    }
+
+    #[test]
+    fn rejects_an_unknown_client_and_a_client_with_a_target() {
+        assert!(Cli::try_parse_from(["pollen", "update", "--client", "cursor"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "pollen", "update", "--client", "claude", "--target", "skills"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_client_parses_from_its_command_line_name() {
+        assert_eq!("agent-skills".parse(), Ok(ClientChoice::AgentSkills));
+        assert!("cursor".parse::<ClientChoice>().is_err());
     }
 
     #[cfg(unix)]

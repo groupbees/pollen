@@ -2,13 +2,17 @@
 #
 # Every key pollen understands, with its default in a comment.
 
-# Where the skills are deployed; each directory gets a full copy. A relative
-# path resolves against the working directory, and `~` is expanded.
-# Default: .claude/skills (what Claude Code reads) and .agents/skills (the
-# cross-client convention every other Agent Skills client scans).
-targets:
-  - .claude/skills
-  - .agents/skills
+# The clients the skills are deployed for, each through its own skill
+# directory: `claude` (.claude/skills, what Claude Code reads) and
+# `agent-skills` (.agents/skills, the cross-client convention every other
+# Agent Skills client scans). Under the home directory with --global.
+# Default: all.
+clients: all
+
+# Or directories of your own instead of `clients`; each gets a full copy. A
+# relative path resolves against the working directory, and `~` is expanded.
+# targets:
+#   - ~/team/skills
 
 repos:
   # A git repository, pinned to a tag, a branch or a commit.
