@@ -107,7 +107,7 @@ pub async fn inspect(
         .into_iter()
         .map(|dir| {
             let path = relative_slug(&root, &dir);
-            match skill::load(&dir) {
+            match skill::load(&dir, false) {
                 Ok(frontmatter) => Entry {
                     path,
                     name: Some(frontmatter.name),

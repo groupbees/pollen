@@ -36,8 +36,9 @@ anything. A skill folder that also carries a `.claude-plugin/plugin.json` is
 copied whole, so plugin-shaped skills keep working too.
 
 What it is not: a registry, a package manager with dependency resolution, or a
-skill authoring tool. It moves directories that already exist and validates
-them against the specification.
+skill authoring tool. It moves directories that already exist, validates
+them against the specification and refuses any that hides invisible
+characters.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the reasoning behind
 it.

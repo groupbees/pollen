@@ -7,6 +7,7 @@ pub mod config;
 pub mod credentials;
 pub mod deploy;
 pub mod discovery;
+pub mod hidden;
 pub mod http;
 pub mod schema;
 pub mod shutdown;
