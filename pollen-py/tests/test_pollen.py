@@ -97,8 +97,9 @@ def test_an_invalid_skill_raises_with_the_problem(workspace: Path, cache_dir: Pa
 def test_a_skill_hiding_characters_passes_only_when_allowed(
     workspace: Path, cache_dir: Path
 ) -> None:
-    with (workspace / "local-skills" / "gamma" / "SKILL.md").open("a") as manifest:
-        manifest.write("Ship\u200b it.\n")
+    manifest = workspace / "local-skills" / "gamma" / "SKILL.md"
+    with manifest.open("a", encoding="utf-8") as file:
+        file.write("Ship\u200b it.\n")
 
     with pytest.raises(pollen.PollenError, match="invisible character"):
         pollen.validate(cache_dir=cache_dir)
