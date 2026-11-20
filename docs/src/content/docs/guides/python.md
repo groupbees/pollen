@@ -93,8 +93,7 @@ the arguments instead.
 | `schema()` | `pollen schema` | the JSON Schema, as a `str` |
 
 `validate` checks one config file. It raises `PollenError` when the file is
-invalid or a selected skill breaks the Agent Skills specification, with every
-offending skill in the message. Otherwise it returns the skills the config
+invalid or a selected skill is, with every offending skill in the message. Otherwise it returns the skills the config
 selects, or `skills=None` with `config_only=True`.
 
 `outdated` and `autoupdate` ask each remote for its tags and each

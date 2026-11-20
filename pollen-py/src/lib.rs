@@ -229,7 +229,7 @@ fn validate(
 
     if !validation.problems.is_empty() {
         return Err(PollenError::new_err(format!(
-            "{}: {} skill(s) do not satisfy the Agent Skills specification:\n{}",
+            "{}: {} skill(s) are invalid:\n{}",
             validation.path.display(),
             validation.problems.len(),
             validation.problems.join("\n"),

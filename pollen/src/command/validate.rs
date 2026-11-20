@@ -68,7 +68,7 @@ pub async fn run(
 /// Check the config file at `path`, and unless `config_only` every skill its
 /// sources select.
 ///
-/// A skill that breaks the specification lands in `problems` rather than
+/// An invalid skill lands in `problems` rather than
 /// failing the check, so every one of them is reported.
 ///
 /// # Errors
@@ -140,9 +140,6 @@ fn report(validation: &Validation) -> Result<()> {
         tracing::debug!(count = skills.len(), "every selected skill is valid");
         Ok(())
     } else {
-        bail!(
-            "{path}: {} skill(s) do not satisfy the Agent Skills specification",
-            validation.problems.len()
-        )
+        bail!("{path}: {} skill(s) are invalid", validation.problems.len())
     }
 }

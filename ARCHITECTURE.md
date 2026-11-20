@@ -77,7 +77,9 @@ to a module under [pollen/src/](pollen/src/), except the last.
 - **[skill](pollen/src/skill.rs)** — reads and validates a `SKILL.md`'s YAML
   frontmatter against the Agent Skills specification. Unknown keys are kept
   out of the model deliberately: agents extend the frontmatter with their own
-  fields, and rejecting those would refuse perfectly good skills.
+  fields, and rejecting those would refuse perfectly good skills. It also
+  refuses a skill whose text files hold an invisible character, which
+  [hidden](pollen/src/hidden.rs) finds.
 - **[deploy](pollen/src/deploy.rs)** — copies a skill tree and fingerprints it. Every
   install is staged in a sibling directory and moved in with a rename, and a
   replacement moves the previous version aside first so a failed rename can be
@@ -267,6 +269,18 @@ specification stops the whole run rather than being installed and ignored by
 the agent later. A skill that is silently not loaded is a worse outcome than
 an error naming the file.
 
+**Invisible characters refuse a skill.** An agent reads every code point of
+a skill; a reviewer reading it on a forge or in an editor sees none of the
+zero-width and bidirectional controls, tag characters or stray variation
+selectors, so they carry instructions nobody approved. Every UTF-8 file of
+the skill is checked, not only `SKILL.md`, since an agent reads its
+references and scripts too. Stripping them would deploy bytes the publisher
+never shipped, and break the digest a `well-known` skill is pinned to; a
+warning would deploy the injection anyway. The characters text needs are
+told apart by position: a joiner between two non-ASCII characters (emoji
+sequences, Persian, Indic scripts), a presentation selector after a visible
+character (`⚠️`), a byte order mark opening a file.
+
 **No lockfile.** A lockfile exists to freeze what a resolver chose: version
 ranges and transitive dependencies. pollen has neither — a `revision` names one
 thing, and a skill depends on nothing — so the commit pinned in `pollen.yaml`
@@ -297,6 +311,8 @@ digest. A second file would only repeat the config, and could disagree with it.
   check, including child directory symlinks. Excluded candidates are not selected.
 - Managed state keys follow the same name rules as authored skills. Unsafe
   keys refuse the target before installing, pruning or sweeping staging material.
+- A deployed skill's UTF-8 files hold no invisible character beyond the
+  joiners, presentation selectors and opening byte order mark text needs.
 - An install becomes visible in one rename. There is no window in which the
   target holds a partially written skill.
 - A `well-known` artifact is used only once its SHA-256 matches the index,
@@ -331,6 +347,11 @@ digest. A second file would only repeat the config, and could disagree with it.
   A backdated tag passes `--min-release-age`.
 - Only regular files and directories are copied; a symlink inside a skill is
   skipped with a warning, and so is a link inside a `well-known` archive.
+- Only UTF-8 files are checked for invisible characters: a file in another
+  encoding is treated as binary. Tag characters are refused even in the
+  subdivision flags that use them (England's, Scotland's, Wales'), and
+  lookalike letters such as a Cyrillic `а` for a Latin `a` are visible, so not
+  refused.
 - A `well-known` archive keeps file modes only when it records them; a
   publisher that repacks a skill without them deploys its scripts without
   the executable bit.

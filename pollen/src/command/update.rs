@@ -200,10 +200,7 @@ pub async fn update(
         for problem in &plan.problems {
             tracing::error!("{problem}");
         }
-        bail!(
-            "{} skill(s) do not satisfy the Agent Skills specification",
-            plan.problems.len()
-        );
+        bail!("{} skill(s) are invalid", plan.problems.len());
     }
 
     let mut summaries = Vec::with_capacity(targets.len());
@@ -844,8 +841,31 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("Agent Skills specification"), "{error}");
+        assert!(error.contains("skill(s) are invalid"), "{error}");
         assert!(!target.path().join("Bad-Name").exists());
+    }
+
+    #[tokio::test]
+    async fn refuses_a_skill_hiding_invisible_characters() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let dir = source.path().join("skills/demo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: demo\ndescription: x\n---\n\u{e0049}\u{e0067}\u{e006e}\n",
+        )
+        .unwrap();
+        let config = config_with(1);
+        let mock = materializer(source.path());
+
+        let error = update(&config, &one(target.path()), &mock, false, false)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("skill(s) are invalid"), "{error}");
+        assert!(!target.path().join("demo").exists());
     }
 
     #[tokio::test]

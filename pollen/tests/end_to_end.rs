@@ -300,7 +300,7 @@ async fn config_only_validation_does_not_look_at_the_skills() {
         .await
         .unwrap_err()
         .to_string();
-    assert!(error.contains("Agent Skills specification"), "{error}");
+    assert!(error.contains("skill(s) are invalid"), "{error}");
 }
 
 #[tokio::test]

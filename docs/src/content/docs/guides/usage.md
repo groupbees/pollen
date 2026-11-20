@@ -23,6 +23,14 @@ Check the config and every skill it selects, without deploying:
 pollen validate
 ```
 
+A skill is invalid when its frontmatter breaks the specification, or when one
+of its text files holds a character an agent reads but a reviewer does not
+see: zero-width and bidirectional controls, tag characters, stray variation
+selectors, fillers and terminal control codes. Such characters are how a skill
+smuggles in instructions nobody approved, so `update`, `validate` and `show`
+refuse it, naming the file and where the first one sits. Emoji sequences,
+Persian or Indic joiners and a byte order mark opening a file are allowed.
+
 A repository that publishes skills can run the same check in GitHub Actions
 with [groupbees/skill-action](https://github.com/groupbees/skill-action), which
 also lints every skill with
