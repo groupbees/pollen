@@ -113,10 +113,12 @@ Print the JSON Schema for the config file:
 pollen schema
 ```
 
-Deploy somewhere else, for this run only:
+Deploy somewhere else, for this run only — into directories of your own, or
+for some clients only, whatever the config's `targets` and `clients` say:
 
 ```sh
 pollen update --target ~/.claude/skills --target ~/.agents/skills
+pollen update --client claude
 ```
 
 Deploy the skills you want in every project, from your user-level config:

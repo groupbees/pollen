@@ -57,6 +57,20 @@ def test_targets_override_the_config(workspace: Path, tmp_path: Path, cache_dir:
     assert (elsewhere / "gamma" / "SKILL.md").is_file()
 
 
+def test_clients_override_the_config(workspace: Path, cache_dir: Path) -> None:
+    report = pollen.update(cache_dir=cache_dir, clients=["agent-skills"])
+
+    assert [summary.target for summary in report.summaries] == [Path(".agents/skills")]
+    assert (workspace / ".agents" / "skills" / "gamma" / "SKILL.md").is_file()
+
+
+def test_rejects_an_unknown_client_and_clients_with_targets(cache_dir: Path) -> None:
+    with pytest.raises(ValueError, match="cursor"):
+        pollen.update(cache_dir=cache_dir, clients=["cursor"])  # pyright: ignore[reportArgumentType]
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        pollen.update(cache_dir=cache_dir, targets=["skills"], clients=["claude"])
+
+
 def test_list_installed_reads_what_update_recorded(workspace: Path, cache_dir: Path) -> None:
     pollen.update(cache_dir=cache_dir)
 

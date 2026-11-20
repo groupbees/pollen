@@ -256,24 +256,27 @@ impl Config {
             .collect()
     }
 
-    /// The directories to deploy into: the CLI overrides, else the config's
-    /// `targets`, else the skill directories of its `clients` — in the
+    /// The directories to deploy into: the CLI's `targets`, else the skill
+    /// directories of the CLI's `clients`, else the config's `targets`, else
+    /// the skill directories of its `clients`. A client's directory is in the
     /// working directory, or in the home directory when `global`.
     ///
     /// Duplicates are dropped so a directory named twice is written once.
     #[must_use]
-    pub fn targets(&self, overrides: &[PathBuf], global: bool) -> Vec<PathBuf> {
-        let chosen = if !overrides.is_empty() {
-            overrides.to_vec()
+    pub fn targets(&self, targets: &[PathBuf], clients: &[Client], global: bool) -> Vec<PathBuf> {
+        let dirs = |clients: &[Client]| clients.iter().map(|client| client.dir(global)).collect();
+        let chosen = if !targets.is_empty() {
+            targets.to_vec()
+        } else if !clients.is_empty() {
+            dirs(clients)
         } else if let Some(targets) = &self.targets {
             targets.clone()
         } else {
-            self.clients
-                .as_ref()
-                .map_or(&Client::ALL[..], Clients::list)
-                .iter()
-                .map(|client| client.dir(global))
-                .collect()
+            dirs(
+                self.clients
+                    .as_ref()
+                    .map_or(&Client::ALL[..], Clients::list),
+            )
         };
 
         let mut seen = BTreeSet::new();
@@ -743,7 +746,7 @@ mod tests {
         let config = parse("repos:\n  - repo: local\n    paths:\n      - path: .\n").unwrap();
 
         assert_eq!(
-            config.targets(&[], false),
+            config.targets(&[], &[], false),
             [
                 PathBuf::from(".claude/skills"),
                 PathBuf::from(".agents/skills")
@@ -759,10 +762,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            config.targets(&[PathBuf::from("/tmp/override")], false),
+            config.targets(&[PathBuf::from("/tmp/override")], &[], false),
             [PathBuf::from("/tmp/override")]
         );
-        assert_eq!(config.targets(&[], false), [PathBuf::from("/opt/skills")]);
+        assert_eq!(
+            config.targets(&[], &[], false),
+            [PathBuf::from("/opt/skills")]
+        );
     }
 
     #[test]
@@ -771,7 +777,7 @@ mod tests {
         let home = dirs::home_dir().unwrap();
 
         assert_eq!(
-            config.targets(&[], true),
+            config.targets(&[], &[], true),
             [home.join(".claude/skills"), home.join(".agents/skills")]
         );
     }
@@ -956,7 +962,10 @@ mod tests {
         let config = parse("repos:\n  - repo: local\n    paths:\n      - path: .\n").unwrap();
         let repeated = vec![PathBuf::from("skills"), PathBuf::from("skills")];
 
-        assert_eq!(config.targets(&repeated, false), [PathBuf::from("skills")]);
+        assert_eq!(
+            config.targets(&repeated, &[], false),
+            [PathBuf::from("skills")]
+        );
     }
 
     #[test]
@@ -976,7 +985,7 @@ mod tests {
             .unwrap();
 
             assert_eq!(
-                config.targets(&[], false),
+                config.targets(&[], &[], false),
                 expected.iter().map(PathBuf::from).collect::<Vec<_>>(),
                 "{clients}"
             );
@@ -990,7 +999,10 @@ mod tests {
                 .unwrap();
         let home = dirs::home_dir().unwrap();
 
-        assert_eq!(config.targets(&[], true), [home.join(".claude/skills")]);
+        assert_eq!(
+            config.targets(&[], &[], true),
+            [home.join(".claude/skills")]
+        );
     }
 
     #[test]
@@ -1000,9 +1012,25 @@ mod tests {
                 .unwrap();
 
         assert_eq!(
-            config.targets(&[PathBuf::from("/tmp/override")], false),
+            config.targets(&[PathBuf::from("/tmp/override")], &[], false),
             [PathBuf::from("/tmp/override")]
         );
+    }
+
+    #[test]
+    fn cli_clients_win_over_the_config() {
+        for keys in ["targets: [skills]\n", "clients: [agent-skills]\n", ""] {
+            let config = parse(&format!(
+                "{keys}repos:\n  - repo: local\n    paths:\n      - path: .\n"
+            ))
+            .unwrap();
+
+            assert_eq!(
+                config.targets(&[], &[Client::Claude], false),
+                [PathBuf::from(".claude/skills")],
+                "{keys}"
+            );
+        }
     }
 
     #[test]

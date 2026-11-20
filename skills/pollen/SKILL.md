@@ -40,6 +40,7 @@ git host accepts; public ones work over HTTPS as is.
 
 `clients: [claude]` (or `[agent-skills]`; default `all`) deploys into one of
 the pair only; `targets: [<dir>, …]` names other directories instead.
+`--client` and `--target` override both for one run.
 
 One config per target directory: an update removes whatever its config does
 not declare, so pollen refuses a directory another config manages. Add sources

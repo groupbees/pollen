@@ -6,7 +6,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use pollen::cli::Options;
+use pollen::cli::{ClientChoice, Options};
 use pollen::command;
 use pollen::command::autoupdate::DigestBump;
 use pollen::command::outdated::{Entry, Pending};
@@ -36,6 +36,7 @@ fn options(
     config: Option<PathBuf>,
     global: bool,
     targets: Option<Vec<PathBuf>>,
+    clients: Option<Vec<String>>,
     cache_dir: Option<PathBuf>,
     offline: bool,
     credentials_file: Option<PathBuf>,
@@ -45,11 +46,26 @@ fn options(
             "`config` and `global_` are mutually exclusive",
         ));
     }
+    if targets.is_some() && clients.is_some() {
+        return Err(PyValueError::new_err(
+            "`targets` and `clients` are mutually exclusive",
+        ));
+    }
+    let clients = clients
+        .unwrap_or_default()
+        .iter()
+        .map(|client| {
+            client
+                .parse::<ClientChoice>()
+                .map_err(PyValueError::new_err)
+        })
+        .collect::<PyResult<_>>()?;
     let defaults = Options::default();
     Ok(Options {
         config: config.unwrap_or(defaults.config),
         global,
         targets: targets.unwrap_or_default(),
+        clients,
         cache_dir,
         offline,
         credentials_file,
@@ -93,13 +109,14 @@ async fn interrupted() -> PyErr {
 
 /// Install, refresh and prune the skills the config declares.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, credentials_file=None, dry_run=false, force=false))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, offline=false, credentials_file=None, dry_run=false, force=false))]
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn update(
     py: Python<'_>,
     config: Option<PathBuf>,
     global_: bool,
     targets: Option<Vec<PathBuf>>,
+    clients: Option<Vec<String>>,
     cache_dir: Option<PathBuf>,
     offline: bool,
     credentials_file: Option<PathBuf>,
@@ -110,6 +127,7 @@ fn update(
         config,
         global_,
         targets,
+        clients,
         cache_dir,
         offline,
         credentials_file,
@@ -155,16 +173,17 @@ fn action(py: Python<'_>, action: command::update::Action) -> PyResult<Bound<'_,
 
 /// The skills pollen manages in each target directory.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, offline=false))]
 fn list_installed(
     py: Python<'_>,
     config: Option<PathBuf>,
     global_: bool,
     targets: Option<Vec<PathBuf>>,
+    clients: Option<Vec<String>>,
     cache_dir: Option<PathBuf>,
     offline: bool,
 ) -> PyResult<Vec<Bound<'_, PyAny>>> {
-    let options = options(config, global_, targets, cache_dir, offline, None)?;
+    let options = options(config, global_, targets, clients, cache_dir, offline, None)?;
     let deployed = py
         .detach(|| command::list::installed(&options))
         .map_err(|error| PollenError::new_err(format!("{error:#}")))?;
@@ -200,13 +219,14 @@ fn list_installed(
 /// Raises `PollenError` when the config is invalid or a selected skill breaks
 /// the Agent Skills specification.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, offline=false, credentials_file=None, config_only=false, pinned=false))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, offline=false, credentials_file=None, config_only=false, pinned=false))]
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn validate(
     py: Python<'_>,
     config: Option<PathBuf>,
     global_: bool,
     targets: Option<Vec<PathBuf>>,
+    clients: Option<Vec<String>>,
     cache_dir: Option<PathBuf>,
     offline: bool,
     credentials_file: Option<PathBuf>,
@@ -217,6 +237,7 @@ fn validate(
         config,
         global_,
         targets,
+        clients,
         cache_dir,
         offline,
         credentials_file,
@@ -264,17 +285,27 @@ fn validate(
 /// those younger than `min_release_age`, and each skill listed under a
 /// `well-known` source against its index.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, credentials_file=None, min_release_age=None))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, credentials_file=None, min_release_age=None))]
+#[allow(clippy::too_many_arguments)]
 fn outdated(
     py: Python<'_>,
     config: Option<PathBuf>,
     global_: bool,
     targets: Option<Vec<PathBuf>>,
+    clients: Option<Vec<String>>,
     cache_dir: Option<PathBuf>,
     credentials_file: Option<PathBuf>,
     min_release_age: Option<Duration>,
 ) -> PyResult<Vec<Bound<'_, PyAny>>> {
-    let options = options(config, global_, targets, cache_dir, false, credentials_file)?;
+    let options = options(
+        config,
+        global_,
+        targets,
+        clients,
+        cache_dir,
+        false,
+        credentials_file,
+    )?;
     let statuses = block_on(py, command::outdated::statuses(&options, min_release_age))?;
 
     statuses
@@ -320,20 +351,29 @@ fn pending<'py>(py: Python<'py>, pending: Option<&Pending>) -> PyResult<Option<B
 /// Move every git source to its newest release at least `min_release_age`
 /// old, rewriting the config file unless `dry_run`.
 #[pyfunction]
-#[pyo3(signature = (*, config=None, global_=false, targets=None, cache_dir=None, credentials_file=None, freeze=false, dry_run=false, min_release_age=None))]
+#[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, credentials_file=None, freeze=false, dry_run=false, min_release_age=None))]
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn autoupdate(
     py: Python<'_>,
     config: Option<PathBuf>,
     global_: bool,
     targets: Option<Vec<PathBuf>>,
+    clients: Option<Vec<String>>,
     cache_dir: Option<PathBuf>,
     credentials_file: Option<PathBuf>,
     freeze: bool,
     dry_run: bool,
     min_release_age: Option<Duration>,
 ) -> PyResult<Bound<'_, PyAny>> {
-    let options = options(config, global_, targets, cache_dir, false, credentials_file)?;
+    let options = options(
+        config,
+        global_,
+        targets,
+        clients,
+        cache_dir,
+        false,
+        credentials_file,
+    )?;
     let outcome = block_on(
         py,
         command::autoupdate::apply(&options, freeze, dry_run, min_release_age),
@@ -387,7 +427,7 @@ fn show<'py>(
     cache_dir: Option<PathBuf>,
     offline: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let options = options(None, false, None, cache_dir, offline, None)?;
+    let options = options(None, false, None, None, cache_dir, offline, None)?;
     let cache_dir = options.cache_dir();
     let listing = block_on(
         py,

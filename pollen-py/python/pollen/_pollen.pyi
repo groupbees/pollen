@@ -1,6 +1,6 @@
 from datetime import timedelta
 from os import PathLike
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 from pollen._types import (
     AutoupdateOutcome,
@@ -13,6 +13,7 @@ from pollen._types import (
 )
 
 StrPath: TypeAlias = str | PathLike[str]
+Client: TypeAlias = Literal["claude", "agent-skills", "all"]
 
 class PollenError(Exception):
     """A pollen command failed."""
@@ -22,6 +23,7 @@ def update(
     config: StrPath | None = None,
     global_: bool = False,
     targets: list[StrPath] | None = None,
+    clients: list[Client] | None = None,
     cache_dir: StrPath | None = None,
     offline: bool = False,
     credentials_file: StrPath | None = None,
@@ -35,6 +37,7 @@ def list_installed(
     config: StrPath | None = None,
     global_: bool = False,
     targets: list[StrPath] | None = None,
+    clients: list[Client] | None = None,
     cache_dir: StrPath | None = None,
     offline: bool = False,
 ) -> list[Deployed]:
@@ -45,6 +48,7 @@ def validate(
     config: StrPath | None = None,
     global_: bool = False,
     targets: list[StrPath] | None = None,
+    clients: list[Client] | None = None,
     cache_dir: StrPath | None = None,
     offline: bool = False,
     credentials_file: StrPath | None = None,
@@ -58,6 +62,7 @@ def outdated(
     config: StrPath | None = None,
     global_: bool = False,
     targets: list[StrPath] | None = None,
+    clients: list[Client] | None = None,
     cache_dir: StrPath | None = None,
     credentials_file: StrPath | None = None,
     min_release_age: timedelta | None = None,
@@ -69,6 +74,7 @@ def autoupdate(
     config: StrPath | None = None,
     global_: bool = False,
     targets: list[StrPath] | None = None,
+    clients: list[Client] | None = None,
     cache_dir: StrPath | None = None,
     credentials_file: StrPath | None = None,
     freeze: bool = False,
