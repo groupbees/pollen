@@ -23,6 +23,11 @@ Check the config and every skill it selects, without deploying:
 pollen validate
 ```
 
+A repository that publishes skills can run the same check in GitHub Actions
+with [groupbees/skill-action](https://github.com/groupbees/skill-action), which
+also lints every skill with
+[skill-validator](https://github.com/agent-ecosystem/skill-validator).
+
 Check config files alone, fetching nothing:
 
 ```sh
