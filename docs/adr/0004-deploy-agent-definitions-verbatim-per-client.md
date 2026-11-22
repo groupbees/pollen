@@ -23,9 +23,11 @@ makes an agent worth writing:
 | Tools | `tools`, an allowlist | `permissions` rules |
 | Model | an alias (`opus`) | `provider/model#variant` |
 
-OpenCode reads skills from `.agents/skills/`, the cross-client directory.
-`clients` ([#83](https://github.com/groupbees/pollen/pull/83)) maps a client to one skill directory, with `agent-skills`
-standing for that directory rather than for a client, and is mutually
+OpenCode reads skills from `.agents/skills/`, the cross-client directory
+other clients scan too. `clients`
+([#83](https://github.com/groupbees/pollen/pull/83)) maps a client to one
+skill directory, with `claude` for Claude Code and `agent-skills` standing
+for that cross-client directory rather than for a client, and is mutually
 exclusive with `targets`. Claude Code plugins already distribute agents, for
 Claude Code only, through a marketplace.
 
@@ -46,13 +48,18 @@ translates between formats.
 directory, an optional agent directory, its user-level root, its agent file
 extension, how it names an agent, and the frontmatter fields it requires.
 Adding a client is adding a row; there is no adapter trait and no
-user-defined client.
+user-defined client. A row is a product, named as the product names itself;
+never a directory convention.
 
 | Client | Skills | Agents | User-level root | Identity | Required |
 | --- | --- | --- | --- | --- | --- |
-| `claude` | `.claude/skills` | `.claude/agents` | `~` | `name`, equal to the file stem | `name`, `description` |
-| `agent-skills` | `.agents/skills` | — | `~` | — | — |
+| `claude-code` | `.claude/skills` | `.claude/agents` | `~` | `name`, equal to the file stem | `name`, `description` |
 | `opencode` | `.agents/skills` | `.opencode/agents` | `$XDG_CONFIG_HOME/opencode` for agents | the file stem, flat | `description` |
+
+Another client reading `.agents/skills` gets a row of its own, sharing that
+skill directory, once its behaviour is checked; the deduplication of target
+directories keeps one copy. A client the table does not list is served
+through `targets`.
 
 **Declaring agents.** A `repo` or `local` entry takes an `agents:` list beside
 `paths:`. Each item names a `path`, a required `client` — never inferred from
@@ -64,7 +71,8 @@ skill and an agent, or one name across two clients, do not collide.
 **Where things land.**
 
 - `clients` defaults to `all`, every client pollen knows, and `all` grows as
-  pollen learns clients. An agent is deployed only for a client in `clients`
+  pollen learns clients. With `claude-code` and `opencode`, it writes the
+  same skill directories as the default before agents. An agent is deployed only for a client in `clients`
   that the config declares agents for, and a directory is created only when
   something is planned for it.
 - `targets` and `clients` combine: `targets` replaces the skill directories
@@ -123,9 +131,14 @@ flowchart LR
   key never holds a `/`.
 - pollen refuses state files from a later version, so a version 2 file stops
   an older pollen until it is upgraded.
-- #83's surface — `clients`, `--client`, `POLLEN_CLIENTS`, `clients=` — stays;
-  its one-directory `Client` becomes the table, and its exclusivity between
-  `targets` and `clients` goes.
+- No value selects "every client reading `.agents/skills`": a user of a
+  client absent from the table writes `targets: [.agents/skills]`, and
+  widening that set takes a release per client.
+- #83's surface — `clients`, `--client`, `POLLEN_CLIENTS`, `clients=` — stays,
+  with `claude-code` and `opencode` as its values instead of `claude` and
+  `agent-skills`; its one-directory `Client` becomes the table, and its
+  exclusivity between `targets` and `clients` goes. No release carries the
+  old values.
 
 ## Alternatives considered
 
@@ -136,6 +149,11 @@ flowchart LR
   what the author wrote.
 - **A client adapter trait**: a client's behaviour is data with no I/O of its
   own to isolate in tests, so a trait adds dispatch for nothing.
+- **A row for the `.agents/skills` convention (`agent-skills`)**: it names a
+  directory, not a tool, has no agent directory, and choosing it says nothing
+  about which client is in use, which is what the agent rows depend on.
+- **`open-code`**: the project writes itself `opencode`, in its command, its
+  config file and its directory.
 - **User-defined clients in `pollen.yaml`**: they bypass per-client validation
   and the identity rule that stops one agent shadowing another.
 - **`targets` and `clients` mutually exclusive**: a config with a skill
