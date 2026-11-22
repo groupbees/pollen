@@ -237,9 +237,10 @@ repository: it pushes to `groupbees/homebrew-tap` with a token minted from a
 GitHub App installed on that repository with `contents: write`, whose client
 ID is the `HOMEBREW_TAP_CLIENT_ID` repository variable and whose private key
 is the `HOMEBREW_TAP_PRIVATE_KEY` secret. `renovate` opens its pull requests with the `RENOVATE_TOKEN` secret, a
-fine-grained token on this repository with contents, pull requests, issues
-and workflows write and Dependabot alerts read: a pull request opened with
-`GITHUB_TOKEN` would trigger no CI. Everything else uses the workflow's
+fine-grained token on this repository with contents, pull requests, issues,
+workflows and commit statuses write (the `renovate/stability-days` status) and
+Dependabot alerts read: a pull request opened with `GITHUB_TOKEN` would
+trigger no CI. Everything else uses the workflow's
 own `GITHUB_TOKEN`: `release` holds `contents: write` in the job that creates
 the release, along with `id-token: write` and `attestations: write` to sign
 and store its attestations; `security`
