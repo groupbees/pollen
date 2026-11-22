@@ -10,6 +10,10 @@
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
   "minimumReleaseAge": "3 days",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 9am on monday"]
+  },
   "ignorePaths": [
     "**/node_modules/**",
     "**/bower_components/**",
