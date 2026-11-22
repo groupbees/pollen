@@ -70,6 +70,7 @@ async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
         &fetcher,
         false,
         false,
+        false,
     )
     .await
     .unwrap();
@@ -99,6 +100,7 @@ async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
         &config,
         std::slice::from_ref(&target),
         &offline,
+        false,
         false,
         false,
     )
@@ -140,6 +142,7 @@ async fn a_moved_tag_reinstalls_the_skill() {
         &fetcher,
         false,
         false,
+        false,
     )
     .await
     .unwrap();
@@ -156,6 +159,7 @@ async fn a_moved_tag_reinstalls_the_skill() {
         &config,
         std::slice::from_ref(&target),
         &fetcher,
+        false,
         false,
         false,
     )
@@ -216,12 +220,19 @@ async fn run_validate(args: &[&str]) -> anyhow::Result<()> {
         configs,
         config_only,
         pinned,
+        allow_hidden_characters,
     } = &cli.command
     else {
         panic!("not a validate invocation");
     };
-    let (configs, config_only, pinned) = (configs.clone(), *config_only, *pinned);
-    pollen::command::validate::run(&cli.options, &configs, config_only, pinned).await
+    pollen::command::validate::run(
+        &cli.options,
+        configs,
+        *config_only,
+        *pinned,
+        *allow_hidden_characters,
+    )
+    .await
 }
 
 fn write_config(dir: &Path, name: &str, body: &str) -> String {
@@ -300,7 +311,7 @@ async fn config_only_validation_does_not_look_at_the_skills() {
         .await
         .unwrap_err()
         .to_string();
-    assert!(error.contains("Agent Skills specification"), "{error}");
+    assert!(error.contains("skill(s) are invalid"), "{error}");
 }
 
 #[tokio::test]
@@ -532,14 +543,14 @@ mod well_known {
         let mut options = options(&config, cache.path(), credentials);
         options.targets = vec![workspace.path().join("deployed")];
 
-        let report = update::report(&options, false, false).await.unwrap();
+        let report = update::report(&options, false, false, false).await.unwrap();
         assert_eq!(report.count(update::Action::Added), 1);
         let state = pollen::state::State::load(&workspace.path().join("deployed")).unwrap();
         assert_eq!(state.skills["alpha"].digest, Some(digest(&first)));
         assert_eq!(state.skills["alpha"].repo, server.uri());
 
         assert!(
-            validate::check(&options, &config, true, true)
+            validate::check(&options, &config, true, true, false)
                 .await
                 .is_err()
         );
@@ -555,7 +566,7 @@ mod well_known {
             )),
             "{text}"
         );
-        validate::check(&options, &config, true, true)
+        validate::check(&options, &config, true, true, false)
             .await
             .unwrap();
 
@@ -563,7 +574,9 @@ mod well_known {
         publish(&server, &[("alpha", &second)]).await;
         let error = format!(
             "{:#}",
-            update::report(&options, false, false).await.unwrap_err()
+            update::report(&options, false, false, false)
+                .await
+                .unwrap_err()
         );
         assert!(error.contains("pinned to"), "{error}");
         let statuses = outdated::statuses(&options, None).await.unwrap();
@@ -572,7 +585,7 @@ mod well_known {
         autoupdate::apply(&options, false, false, None)
             .await
             .unwrap();
-        let report = update::report(&options, false, false).await.unwrap();
+        let report = update::report(&options, false, false, false).await.unwrap();
         assert_eq!(report.count(update::Action::Updated), 1);
         assert_eq!(
             std::fs::read_to_string(workspace.path().join("deployed/alpha/SKILL.md")).unwrap(),
@@ -632,10 +645,10 @@ mod well_known {
         let mut options = options(&config, cache.path(), credentials);
         options.targets = vec![workspace.path().join("deployed")];
 
-        let report = update::report(&options, false, false).await.unwrap();
+        let report = update::report(&options, false, false, false).await.unwrap();
         assert_eq!(report.count(update::Action::Added), 1);
         assert!(workspace.path().join("deployed/alpha/SKILL.md").is_file());
-        let validation = validate::check(&options, &config, false, false)
+        let validation = validate::check(&options, &config, false, false, false)
             .await
             .unwrap();
         assert_eq!(validation.skills.unwrap().len(), 1);
@@ -654,11 +667,13 @@ mod well_known {
         let errors = [
             format!(
                 "{:#}",
-                update::report(&options, false, false).await.unwrap_err()
+                update::report(&options, false, false, false)
+                    .await
+                    .unwrap_err()
             ),
             format!(
                 "{:#}",
-                validate::check(&options, &config, false, false)
+                validate::check(&options, &config, false, false, false)
                     .await
                     .unwrap_err()
             ),

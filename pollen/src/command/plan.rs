@@ -53,11 +53,18 @@ pub struct Plan {
 
 /// Materialize every source and collect the skills its paths select.
 ///
+/// With `allow_hidden_characters`, a skill holding invisible characters is
+/// selected, with a warning, rather than reported as a problem.
+///
 /// # Errors
 ///
 /// When a source cannot be fetched, a declared path is missing, or two
 /// sources provide the same skill name.
-pub async fn build(config: &Config, materializer: &impl Materializer) -> Result<Plan> {
+pub async fn build(
+    config: &Config,
+    materializer: &impl Materializer,
+    allow_hidden_characters: bool,
+) -> Result<Plan> {
     let mut skills: BTreeMap<String, Planned> = BTreeMap::new();
     let mut problems = Vec::new();
 
@@ -93,7 +100,7 @@ pub async fn build(config: &Config, materializer: &impl Materializer) -> Result<
         }
 
         for (dir, source_path, digest) in candidates {
-            let frontmatter = match skill::load(&dir) {
+            let frontmatter = match skill::load(&dir, allow_hidden_characters) {
                 Ok(frontmatter) => frontmatter,
                 Err(error) => {
                     problems.push(format!("{label}: {error}"));

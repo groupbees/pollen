@@ -177,6 +177,15 @@ pub enum Command {
         /// Take ownership of a skill directory pollen did not install.
         #[arg(long, env = "POLLEN_FORCE")]
         force: bool,
+
+        /// Deploy skills whose files hold invisible characters, with a warning
+        /// for each, instead of refusing them.
+        ///
+        /// Zero-width and bidirectional controls, tag characters and stray
+        /// variation selectors are what hidden prompt injections are made of:
+        /// pass this only for a source you trust.
+        #[arg(long, env = "POLLEN_ALLOW_HIDDEN_CHARACTERS")]
+        allow_hidden_characters: bool,
     },
 
     /// Show the skills pollen manages in the target directory.
@@ -204,6 +213,11 @@ pub enum Command {
         /// `revision: <sha>  # v1.2.3`. Works offline, with `--config-only`.
         #[arg(long, env = "POLLEN_PINNED")]
         pinned: bool,
+
+        /// Accept skills whose files hold invisible characters, with a warning
+        /// for each, instead of reporting them as invalid.
+        #[arg(long, env = "POLLEN_ALLOW_HIDDEN_CHARACTERS")]
+        allow_hidden_characters: bool,
     },
 
     /// Print the JSON Schema for `pollen.yaml`.
@@ -366,13 +380,27 @@ where
 async fn run(cli: &Cli) -> Result<()> {
     let options = &cli.options;
     match &cli.command {
-        Command::Update { dry_run, force } => command::update::run(options, *dry_run, *force).await,
+        Command::Update {
+            dry_run,
+            force,
+            allow_hidden_characters,
+        } => command::update::run(options, *dry_run, *force, *allow_hidden_characters).await,
         Command::List => command::list::run(options),
         Command::Validate {
             configs,
             config_only,
             pinned,
-        } => command::validate::run(options, configs, *config_only, *pinned).await,
+            allow_hidden_characters,
+        } => {
+            command::validate::run(
+                options,
+                configs,
+                *config_only,
+                *pinned,
+                *allow_hidden_characters,
+            )
+            .await
+        }
         Command::Schema => command::schema::run(),
         Command::Outdated { min_release_age } => {
             command::outdated::run(options, *min_release_age).await

@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 use validator::{Validate, ValidationError};
+use walkdir::WalkDir;
+
+use crate::hidden::{self, Hidden};
+use crate::source::relative_slug;
 
 /// The file that makes a directory a skill.
 pub const SKILL_FILE: &str = "SKILL.md";
@@ -50,11 +54,25 @@ pub enum SkillError {
         /// The name the frontmatter claims.
         name: String,
     },
-    /// The `SKILL.md` could not be read.
-    #[error("{path}: cannot read {SKILL_FILE}: {source}")]
+    /// A file holds characters a reviewer does not see but an agent reads.
+    #[error("{path}: {file} holds {count} invisible character(s), the first at {first}")]
+    HiddenCharacters {
+        /// The offending skill directory.
+        path: PathBuf,
+        /// The file, relative to the skill directory.
+        file: String,
+        /// How many the file holds.
+        count: usize,
+        /// The first of them.
+        first: Hidden,
+    },
+    /// A file of the skill could not be read.
+    #[error("{path}: cannot read {file}: {source}")]
     Io {
         /// The offending skill directory.
         path: PathBuf,
+        /// The file, relative to the skill directory.
+        file: String,
         /// The underlying failure.
         source: std::io::Error,
     },
@@ -83,11 +101,16 @@ pub struct Frontmatter {
 
 /// Read and validate the skill stored in `dir`.
 ///
+/// With `allow_hidden_characters`, a file holding an invisible character is
+/// logged as a warning instead of refusing the skill.
+///
 /// # Errors
 ///
-/// When the directory holds no `SKILL.md`, or its frontmatter is missing,
-/// unparseable, or outside the Agent Skills specification.
-pub fn load(dir: &Path) -> Result<Frontmatter, SkillError> {
+/// When the directory holds no `SKILL.md`, its frontmatter is missing,
+/// unparseable, or outside the Agent Skills specification, or one of its
+/// text files holds an invisible character and `allow_hidden_characters` is
+/// not set.
+pub fn load(dir: &Path, allow_hidden_characters: bool) -> Result<Frontmatter, SkillError> {
     let manifest = dir.join(SKILL_FILE);
     if !manifest.is_file() {
         return Err(SkillError::NotASkill {
@@ -97,6 +120,7 @@ pub fn load(dir: &Path) -> Result<Frontmatter, SkillError> {
 
     let text = std::fs::read_to_string(&manifest).map_err(|source| SkillError::Io {
         path: dir.to_path_buf(),
+        file: SKILL_FILE.to_owned(),
         source,
     })?;
     let block = split_frontmatter(&text).ok_or_else(|| SkillError::NoFrontmatter {
@@ -122,6 +146,8 @@ pub fn load(dir: &Path) -> Result<Frontmatter, SkillError> {
         });
     }
 
+    check_hidden_characters(dir, allow_hidden_characters)?;
+
     for (key, value) in &frontmatter.metadata {
         if !value.is_string() {
             tracing::warn!(
@@ -133,6 +159,53 @@ pub fn load(dir: &Path) -> Result<Frontmatter, SkillError> {
     }
 
     Ok(frontmatter)
+}
+
+/// Refuse the first file whose text holds an invisible character, or warn
+/// about each one when they are allowed. A file that is not UTF-8 is binary
+/// to an agent too, and is left alone.
+fn check_hidden_characters(dir: &Path, allow: bool) -> Result<(), SkillError> {
+    let walk = WalkDir::new(dir)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|entry| entry.file_name() != ".git");
+    for entry in walk {
+        let entry = entry.map_err(|error| SkillError::Io {
+            path: dir.to_path_buf(),
+            file: error
+                .path()
+                .map_or_else(|| ".".to_owned(), |path| relative_slug(dir, path)),
+            source: error.into(),
+        })?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let file = relative_slug(dir, entry.path());
+        let bytes = std::fs::read(entry.path()).map_err(|source| SkillError::Io {
+            path: dir.to_path_buf(),
+            file: file.clone(),
+            source,
+        })?;
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            tracing::debug!(%file, "not UTF-8, not checked for invisible characters");
+            continue;
+        };
+        let found = hidden::find(text);
+        let Some(&first) = found.first() else {
+            continue;
+        };
+        let error = SkillError::HiddenCharacters {
+            path: dir.to_path_buf(),
+            file,
+            count: found.len(),
+            first,
+        };
+        if !allow {
+            return Err(error);
+        }
+        tracing::warn!("{error}; kept, since invisible characters are allowed");
+    }
+    Ok(())
 }
 
 /// Return the YAML between the opening `---` line and the closing one.
@@ -196,7 +269,7 @@ mod tests {
     fn the_skill_pollen_ships_satisfies_the_specification() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../skills/pollen");
 
-        assert_eq!(load(&dir).unwrap().name, "pollen");
+        assert_eq!(load(&dir, false).unwrap().name, "pollen");
     }
 
     #[test]
@@ -208,7 +281,7 @@ mod tests {
             "---\nname: pdf-processing\ndescription: Extract text from PDFs.\n---\n\nBody.\n",
         );
 
-        let frontmatter = load(&dir).unwrap();
+        let frontmatter = load(&dir, false).unwrap();
 
         assert_eq!(frontmatter.name, "pdf-processing");
         assert_eq!(frontmatter.description, "Extract text from PDFs.");
@@ -223,7 +296,7 @@ mod tests {
             "---\nname: deploy\ndescription: Ship it.\nmodel: opus\ndisable-model-invocation: true\n---\n",
         );
 
-        assert!(load(&dir).is_ok());
+        assert!(load(&dir, false).is_ok());
     }
 
     #[test]
@@ -235,7 +308,10 @@ mod tests {
             "---\nname: ship\ndescription: Ship it.\n---\n",
         );
 
-        assert!(matches!(load(&dir), Err(SkillError::NameMismatch { .. })));
+        assert!(matches!(
+            load(&dir, false),
+            Err(SkillError::NameMismatch { .. })
+        ));
     }
 
     #[test]
@@ -247,7 +323,7 @@ mod tests {
             "---\nname: PDF--Processing\ndescription: Nope.\n---\n",
         );
 
-        assert!(matches!(load(&dir), Err(SkillError::Invalid { .. })));
+        assert!(matches!(load(&dir, false), Err(SkillError::Invalid { .. })));
     }
 
     #[test]
@@ -259,7 +335,7 @@ mod tests {
             "---\nname: deploy\ndescription: \"\"\n---\n",
         );
 
-        assert!(matches!(load(&dir), Err(SkillError::Invalid { .. })));
+        assert!(matches!(load(&dir, false), Err(SkillError::Invalid { .. })));
     }
 
     #[test]
@@ -267,7 +343,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let dir = write_skill(root.path(), "deploy", "# Just markdown\n");
 
-        assert!(matches!(load(&dir), Err(SkillError::NoFrontmatter { .. })));
+        assert!(matches!(
+            load(&dir, false),
+            Err(SkillError::NoFrontmatter { .. })
+        ));
     }
 
     #[test]
@@ -276,9 +355,80 @@ mod tests {
         std::fs::create_dir_all(root.path().join("empty")).unwrap();
 
         assert!(matches!(
-            load(&root.path().join("empty")),
+            load(&root.path().join("empty"), false),
             Err(SkillError::NotASkill { .. })
         ));
+    }
+
+    #[test]
+    fn rejects_a_skill_file_hiding_an_instruction() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = write_skill(
+            root.path(),
+            "deploy",
+            "---\nname: deploy\ndescription: Ship it.\n---\n\nShip\u{200b}\u{200b} it.\n",
+        );
+
+        let error = load(&dir, false).unwrap_err();
+
+        assert!(
+            matches!(
+                &error,
+                SkillError::HiddenCharacters { file, count: 2, first, .. }
+                    if file == SKILL_FILE && first.line == 6 && first.column == 5
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_bundled_file_hiding_an_instruction() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = write_skill(
+            root.path(),
+            "deploy",
+            "---\nname: deploy\ndescription: Ship it.\n---\n",
+        );
+        std::fs::create_dir_all(dir.join("references")).unwrap();
+        std::fs::write(dir.join("references/guide.md"), "Read \u{202e}me\n").unwrap();
+
+        let error = load(&dir, false).unwrap_err().to_string();
+
+        assert!(
+            error.ends_with(
+                "references/guide.md holds 1 invisible character(s), the first at line 1, column 6 (U+202E)"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn keeps_a_skill_hiding_characters_when_they_are_allowed() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = write_skill(
+            root.path(),
+            "deploy",
+            "---\nname: deploy\ndescription: Ship it.\n---\n\nShip\u{200b} it.\n",
+        );
+
+        assert_eq!(load(&dir, true).unwrap().name, "deploy");
+    }
+
+    #[test]
+    fn leaves_binary_files_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = write_skill(
+            root.path(),
+            "deploy",
+            "---\nname: deploy\ndescription: Ship it.\n---\n",
+        );
+        std::fs::write(
+            dir.join("logo.png"),
+            [0x89, b'P', b'N', b'G', 0xff, 0x1b, 0x00],
+        )
+        .unwrap();
+
+        assert!(load(&dir, false).is_ok());
     }
 
     #[test]
@@ -297,7 +447,7 @@ mod tests {
             "\u{feff}---\r\nname: deploy\r\ndescription: Ship it.\r\n---\r\n\r\nBody.\r\n",
         );
 
-        let frontmatter = load(&dir).unwrap();
+        let frontmatter = load(&dir, false).unwrap();
 
         assert_eq!(frontmatter.name, "deploy");
         assert_eq!(frontmatter.description, "Ship it.");
