@@ -10,6 +10,15 @@
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
   "minimumReleaseAge": "3 days",
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/__fixtures__/**"
+  ],
   "labels": ["dependencies"],
   "semanticCommits": "disabled",
   "pre-commit": {
@@ -54,6 +63,18 @@
       "matchManagers": ["npm"],
       "matchPackageNames": ["astro", "@astrojs/*", "satteri", "starlight-*"],
       "groupName": "astro"
+    },
+    {
+      "description": "pyo3-ffi links the Python library, so Cargo refuses two pyo3 versions in one graph: pyo3 bumped past the range pyo3-log accepts fails to resolve",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["pyo3", "pyo3-*"],
+      "groupName": "pyo3"
+    },
+    {
+      "description": "src/http.rs installs the ring provider on our rustls; a rustls that differs from reqwest's leaves reqwest without a provider, and it panics at runtime",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["reqwest", "rustls"],
+      "groupName": "reqwest and rustls"
     },
     {
       "description": "@astrojs/check accepts TypeScript ^5 || ^6 only; a newer major fails npm ci",
