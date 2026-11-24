@@ -27,9 +27,9 @@
       ],
       "type": "object"
     },
-    "RepoSpec": {
+    "RepoV1": {
       "additionalProperties": false,
-      "description": "One source of skills: a git repository, the config file's own directory,\nor an origin publishing an Agent Skills discovery index.",
+      "description": "One source of skills in version 1: a git repository, the config file's own\ndirectory, or an origin publishing an Agent Skills discovery index.",
       "oneOf": [
         {
           "else": {
@@ -130,6 +130,109 @@
       },
       "type": "object"
     },
+    "RepoV2": {
+      "additionalProperties": false,
+      "description": "One source of skills in version 2.",
+      "oneOf": [
+        {
+          "else": {
+            "properties": {
+              "revision": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "revision"
+            ]
+          },
+          "if": {
+            "properties": {
+              "repo": {
+                "const": "local"
+              }
+            }
+          },
+          "properties": {
+            "exclude": false,
+            "skills": {
+              "items": {
+                "$ref": "#/$defs/PathSpec"
+              }
+            },
+            "well-known": false
+          },
+          "required": [
+            "repo",
+            "skills"
+          ],
+          "then": {
+            "properties": {
+              "revision": false
+            }
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "exclude",
+              "skills"
+            ]
+          },
+          "properties": {
+            "repo": false,
+            "revision": false,
+            "skills": {
+              "items": {
+                "$ref": "#/$defs/SkillPin"
+              }
+            }
+          },
+          "required": [
+            "well-known"
+          ]
+        }
+      ],
+      "properties": {
+        "exclude": {
+          "description": "Regular expression rejecting the skills of a `well-known` index whose\nname matches. Only with every skill of the index, not with `skills`.",
+          "format": "regex",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo": {
+          "description": "A git URL, a path to a git repository, or `local` for the directory\nholding this config file.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "revision": {
+          "description": "The git revision to check out: a tag, a branch or a commit.\n\nRequired for a git source, and forbidden on `local` and `well-known`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skills": {
+          "description": "What to take from the source: on a `repo`, where to look for skills,\neach with a `path`; on a `well-known` origin, the skills of its index\nby `name`, instead of all of them.",
+          "items": {
+            "$ref": "#/$defs/SkillV2"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "well-known": {
+          "description": "An `https://` origin serving `/.well-known/agent-skills/index.json`,\nwhose skills are downloaded and checked against the index's digests.",
+          "format": "uri",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "SkillPin": {
       "additionalProperties": false,
       "description": "One skill taken from a `well-known` index.",
@@ -154,36 +257,148 @@
         "name"
       ],
       "type": "object"
+    },
+    "SkillV2": {
+      "additionalProperties": false,
+      "description": "One item of a version 2 `skills` list: where to look on a `repo`, a skill\nof the index on a `well-known` origin. Which keys belong to which is\nchecked against the kind of source, so the message can say why.",
+      "properties": {
+        "digest": {
+          "description": "The SHA-256 of the artifact to deploy (`well-known` only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exclude": {
+          "description": "Regular expression rejecting skills whose path under `path` matches\n(`repo` only).",
+          "format": "regex",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The skill's name in the index (`well-known` only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Directory to search, relative to the source root (`repo` only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recurse": {
+          "description": "Search the whole subtree rather than only the immediate children\n(`repo` only).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "V1": {
+      "additionalProperties": false,
+      "description": "A `pollen.yaml` in format version 1, the format of a file that sets no\n`version`.",
+      "properties": {
+        "repos": {
+          "description": "The sources to pull skills from.",
+          "items": {
+            "$ref": "#/$defs/RepoV1"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "targets": {
+          "description": "Directories the skills are deployed into, each getting a full copy.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded. Defaults to `.claude/skills` and `.agents/skills`, or\nto `~/.claude/skills` and `~/.agents/skills` with `--global`.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "version": {
+          "const": 1,
+          "description": "The format version of this file. 1 is the default when the key is\nabsent.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "repos"
+      ],
+      "title": "pollen configuration, version 1",
+      "type": "object"
+    },
+    "V2": {
+      "additionalProperties": false,
+      "description": "A `pollen.yaml` in format version 2: a source lists what it takes under\n`skills`, whatever kind of source it is.",
+      "properties": {
+        "repos": {
+          "description": "The sources to pull skills from.",
+          "items": {
+            "$ref": "#/$defs/RepoV2"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "targets": {
+          "description": "Directories the skills are deployed into, each getting a full copy.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded. Defaults to `.claude/skills` and `.agents/skills`, or\nto `~/.claude/skills` and `~/.agents/skills` with `--global`.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "version": {
+          "const": 2,
+          "description": "The format version of this file.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "repos"
+      ],
+      "title": "pollen configuration, version 2",
+      "type": "object"
     }
   },
   "$id": "https://raw.githubusercontent.com/groupbees/pollen/main/schema/pollen.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
   "description": "Declares where Agent Skills come from and which directories they are deployed into.",
-  "properties": {
-    "repos": {
-      "description": "The sources to pull skills from.",
-      "items": {
-        "$ref": "#/$defs/RepoSpec"
-      },
-      "minItems": 1,
-      "type": "array"
-    },
-    "targets": {
-      "description": "Directories the skills are deployed into, each getting a full copy.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded. Defaults to `.claude/skills` and `.agents/skills`, or\nto `~/.claude/skills` and `~/.agents/skills` with `--global`.",
-      "items": {
-        "type": "string"
-      },
-      "minItems": 1,
-      "type": [
-        "array",
-        "null"
-      ]
-    }
+  "else": {
+    "$ref": "#/$defs/V1"
   },
-  "required": [
-    "repos"
-  ],
+  "if": {
+    "properties": {
+      "version": {
+        "const": 2
+      }
+    },
+    "required": [
+      "version"
+    ]
+  },
+  "then": {
+    "$ref": "#/$defs/V2"
+  },
   "title": "pollen configuration",
   "type": "object"
 }

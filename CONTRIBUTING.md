@@ -260,7 +260,7 @@ attestation `pypa/gh-action-pypi-publish` uploads with each distribution.
 ## The generated JSON Schema
 
 [schema/pollen.schema.json](schema/pollen.schema.json) is generated from
-the types in [pollen/src/config.rs](pollen/src/config.rs) and committed, because editors and
+the types in [pollen/src/config/raw.rs](pollen/src/config/raw.rs) and committed, because editors and
 external validators point at the file rather than at the binary. Changing the
 config types means regenerating it in the same commit:
 

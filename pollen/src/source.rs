@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::config::{RepoSpec, Source};
+use crate::config::Repo;
 use well_known::{CredentialsFile, WellKnown};
 
 /// A source made available on the local filesystem.
@@ -40,7 +40,7 @@ pub struct Fetched {
 #[cfg_attr(test, mockall::automock)]
 pub trait Materializer {
     /// Fetch or locate `repo`'s files and return where they live.
-    fn materialize(&self, repo: &RepoSpec) -> impl Future<Output = Result<Materialized>> + Send;
+    fn materialize(&self, repo: &Repo) -> impl Future<Output = Result<Materialized>> + Send;
 }
 
 /// The production [`Materializer`]: a git cache, `well-known` origins, and
@@ -73,8 +73,7 @@ impl Fetcher {
 }
 
 impl Materializer for Fetcher {
-    fn materialize(&self, repo: &RepoSpec) -> impl Future<Output = Result<Materialized>> + Send {
-        let source = repo.source();
+    fn materialize(&self, repo: &Repo) -> impl Future<Output = Result<Materialized>> + Send {
         let base_dir = self.base_dir.clone();
         let cache_dir = self.cache_dir.clone();
         let offline = self.offline;
@@ -82,16 +81,16 @@ impl Materializer for Fetcher {
         let repo = repo.clone();
 
         async move {
-            match source {
-                Source::Local => Ok(Materialized {
+            match &repo {
+                Repo::Local { .. } => Ok(Materialized {
                     root: base_dir,
                     resolved: None,
                     skills: Vec::new(),
                 }),
-                Source::Git { url, revision } => {
-                    git::checkout(&url, &revision, &cache_dir, offline).await
+                Repo::Git { url, revision, .. } => {
+                    git::checkout(url, revision, &cache_dir, offline).await
                 }
-                Source::WellKnown { .. } => well_known.materialize(&repo).await,
+                Repo::WellKnown { .. } => well_known.materialize(&repo).await,
             }
         }
     }

@@ -111,7 +111,7 @@ repos:
         entry: scripts/generate-schema.sh
         language: system
         pass_filenames: false
-        files: ^(pollen/src/config\.rs|pollen/src/schema\.rs|schema/pollen\.schema\.json)$
+        files: ^(pollen/src/config/.*\.rs|pollen/src/schema\.rs|schema/pollen\.schema\.json)$
 
       - id: shellcheck
         name: shellcheck

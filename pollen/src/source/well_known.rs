@@ -13,7 +13,7 @@ use tokio::sync::OnceCell;
 
 use super::archive::{self, Format};
 use super::{Fetched, Materialized};
-use crate::config::{RepoSpec, Source, is_digest};
+use crate::config::{IndexSelection, Repo, is_digest};
 use crate::credentials::Credentials;
 use crate::http::Client;
 use crate::skill::{self, SKILL_FILE};
@@ -119,7 +119,7 @@ impl Index {
         Ok(Some(entry))
     }
 
-    /// The entries `repo` selects: the ones its `skills` list names, each
+    /// The entries `selection` takes: the ones its `skills` list names, each
     /// matching its pinned `digest`, else every entry that `exclude` does not
     /// reject and that pollen can install; the others are skipped with a
     /// warning.
@@ -128,10 +128,10 @@ impl Index {
     ///
     /// When a listed skill is missing from the index, cannot be installed,
     /// or is published with a digest other than the pinned one.
-    pub fn select(&self, repo: &RepoSpec) -> Result<Vec<&Entry>> {
+    pub fn select(&self, selection: &IndexSelection) -> Result<Vec<&Entry>> {
         let url = &self.url;
-        let Some(pins) = &repo.skills else {
-            let exclude = repo.exclude_regex()?;
+        let IndexSelection::Only(pins) = selection else {
+            let exclude = selection.exclude_regex()?;
             let mut selected = Vec::new();
             for entry in &self.skills {
                 if exclude
@@ -298,17 +298,21 @@ impl WellKnown {
     /// When `repo` is not a `well-known` source, its index cannot be read,
     /// the selection fails, or an artifact cannot be downloaded, verified or
     /// unpacked.
-    pub async fn materialize(&self, repo: &RepoSpec) -> Result<Materialized> {
-        let Source::WellKnown { origin } = repo.source() else {
+    pub async fn materialize(&self, repo: &Repo) -> Result<Materialized> {
+        let Repo::WellKnown {
+            origin,
+            skills: selection,
+        } = repo
+        else {
             bail!("{} is not a well-known source", repo.label());
         };
-        let index = self.index(&origin).await?;
+        let index = self.index(origin).await?;
         let root = self.root().join("artifacts");
         std::fs::create_dir_all(&root)
             .with_context(|| format!("cannot create the cache directory {}", root.display()))?;
 
         let mut skills = Vec::new();
-        for entry in index.select(repo)? {
+        for entry in index.select(selection)? {
             let dir = self
                 .artifact(&index, entry, &root)
                 .await
@@ -479,20 +483,30 @@ mod tests {
         .unwrap()
     }
 
-    fn repo(skills: Option<Vec<(&str, Option<&str>)>>, exclude: Option<&str>) -> RepoSpec {
-        RepoSpec {
-            well_known: Some("https://x.example".to_owned()),
-            exclude: exclude.map(str::to_owned),
-            skills: skills.map(|skills| {
+    fn selection(
+        skills: Option<Vec<(&str, Option<&str>)>>,
+        exclude: Option<&str>,
+    ) -> IndexSelection {
+        match skills {
+            Some(skills) => IndexSelection::Only(
                 skills
                     .into_iter()
                     .map(|(name, digest)| SkillPin {
                         name: name.to_owned(),
                         digest: digest.map(str::to_owned),
                     })
-                    .collect()
-            }),
-            ..RepoSpec::default()
+                    .collect(),
+            ),
+            None => IndexSelection::All {
+                exclude: exclude.map(str::to_owned),
+            },
+        }
+    }
+
+    fn at(origin: &str) -> Repo {
+        Repo::WellKnown {
+            origin: origin.to_owned(),
+            skills: selection(None, None),
         }
     }
 
@@ -539,11 +553,15 @@ mod tests {
         ]);
 
         assert_eq!(
-            names(&index.select(&repo(None, None)).unwrap()),
+            names(&index.select(&selection(None, None)).unwrap()),
             ["keep", "experimental-x"]
         );
         assert_eq!(
-            names(&index.select(&repo(None, Some("^experimental-"))).unwrap()),
+            names(
+                &index
+                    .select(&selection(None, Some("^experimental-")))
+                    .unwrap()
+            ),
             ["keep"]
         );
     }
@@ -557,7 +575,10 @@ mod tests {
             entry("upper-digest", SKILL_MD, "u", &A.to_uppercase()),
         ]);
 
-        assert_eq!(names(&index.select(&repo(None, None)).unwrap()), ["keep"]);
+        assert_eq!(
+            names(&index.select(&selection(None, None)).unwrap()),
+            ["keep"]
+        );
     }
 
     #[test]
@@ -574,7 +595,7 @@ mod tests {
             ("future", "does not know"),
         ] {
             let error = index
-                .select(&repo(Some(vec![(name, None)]), None))
+                .select(&selection(Some(vec![(name, None)]), None))
                 .unwrap_err()
                 .to_string();
             assert!(
@@ -591,19 +612,19 @@ mod tests {
         let index = index(&[entry("a", SKILL_MD, "a", A), entry("b", SKILL_MD, "b", B)]);
 
         let selected = index
-            .select(&repo(Some(vec![("b", Some(B)), ("a", None)]), None))
+            .select(&selection(Some(vec![("b", Some(B)), ("a", None)]), None))
             .unwrap();
         assert_eq!(names(&selected), ["b", "a"]);
 
         let error = index
-            .select(&repo(Some(vec![("a", Some(B))]), None))
+            .select(&selection(Some(vec![("a", Some(B))]), None))
             .unwrap_err()
             .to_string();
         assert!(error.contains("pinned to") && error.contains(A), "{error}");
 
         assert!(
             index
-                .select(&repo(Some(vec![("missing", None)]), None))
+                .select(&selection(Some(vec![("missing", None)]), None))
                 .is_err()
         );
     }
@@ -661,8 +682,7 @@ mod tests {
         )
         .await;
         let cache = tempfile::tempdir().unwrap();
-        let mut source = repo(None, None);
-        source.well_known = Some(server.uri());
+        let source = at(&server.uri());
 
         let online = well_known(cache.path(), false)
             .materialize(&source)
@@ -701,8 +721,7 @@ mod tests {
         .await;
         serve(&server, "/single.md", skill_md("single"), "text/markdown").await;
         let cache = tempfile::tempdir().unwrap();
-        let mut source = repo(None, None);
-        source.well_known = Some(server.uri());
+        let source = at(&server.uri());
 
         let error = format!(
             "{:#}",
@@ -735,8 +754,7 @@ mod tests {
         .await;
         serve(&server, "/single.md", markdown, "text/markdown").await;
         let cache = tempfile::tempdir().unwrap();
-        let mut source = repo(None, None);
-        source.well_known = Some(server.uri());
+        let source = at(&server.uri());
 
         let materialized = well_known(cache.path(), false)
             .materialize(&source)
@@ -756,7 +774,7 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
 
         let error = well_known(cache.path(), true)
-            .materialize(&repo(None, None))
+            .materialize(&at("https://x.example"))
             .await
             .unwrap_err()
             .to_string();

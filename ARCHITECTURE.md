@@ -35,11 +35,18 @@ The workspace holds two crates: [pollen/](pollen/), the library and the CLI,
 and [pollen-py/](pollen-py/), the Python bindings. Each component below maps
 to a module under [pollen/src/](pollen/src/), except the last.
 
-- **[config](pollen/src/config.rs)** — owns the schema of `pollen.yaml` and every
-  rule about it: an entry is a `repo` or a `well-known` origin, a git source
+- **[config](pollen/src/config/mod.rs)** — owns `pollen.yaml` and every
+  rule about it, and keeps parsing apart from running.
+  [config/raw](pollen/src/config/raw.rs) holds one set of serde types per
+  format version, each with its schema and its validation in its own
+  vocabulary: an entry is a `repo` or a `well-known` origin, a git source
   is pinned to a revision, `local` and `well-known` are not, a `path` never
   climbs out of its source, an `exclude` compiles as a regular expression, a
-  `digest` is a lowercase SHA-256. It resolves the target directories from the CLI overrides, the
+  `digest` is a lowercase SHA-256. A validated file is converted, an older
+  version through each newer one, into the model every command reads:
+  `Config` and the `Repo` enum (`Local`, `Git`, `WellKnown`), where a key
+  that does not belong to its kind of source cannot be represented. It
+  resolves the target directories from the CLI overrides, the
   config, then the default pair (in the working directory, or in the home
   directory with `--global`, which also reads the user-level config),
   dropping duplicates. It knows nothing about
@@ -70,8 +77,9 @@ to a module under [pollen/src/](pollen/src/), except the last.
   is a skill and is never descended into, so a skill that bundles reference
   material does not spawn phantom children.
 - **[schema](pollen/src/schema.rs)** — derives the JSON Schema for `pollen.yaml`
-  from the same types [config](pollen/src/config.rs) deserialises, so the published
-  schema cannot describe a file the parser would reject. It states the shape;
+  from the same types [config/raw](pollen/src/config/raw.rs) deserialises, so the published
+  schema cannot describe a file the parser would reject. One document covers
+  every format version, choosing on `version`. It states the shape;
   the cross-field and semantic rules stay in `config`, which is why a config
   that satisfies the schema can still fail validation.
 - **[skill](pollen/src/skill.rs)** — reads and validates a `SKILL.md`'s YAML
@@ -104,7 +112,8 @@ to a module under [pollen/src/](pollen/src/), except the last.
   it is the pure "what should be deployed" half, and `update` is the half that
   touches disk. Each subcommand is a function that returns its result
   (`update::report`, `list::installed`, `validate::check`,
-  `outdated::statuses`, `autoupdate::apply`, `show::inspect`) and a `run`
+  `outdated::statuses`, `autoupdate::apply`, `migrate::apply`,
+  `show::inspect`) and a `run`
   that prints it. Both take the global options as
   [`cli::Options`](pollen/src/cli.rs), which a library caller builds without
   clap.
@@ -284,6 +293,17 @@ skill is at fault. The characters text needs are
 told apart by position: a joiner between two non-ASCII characters (emoji
 sequences, Persian, Indic scripts), a presentation selector after a visible
 character (`⚠️`), a byte order mark opening a file.
+
+**A versioned config, migrated in place.** A file declares its format
+`version`, 1 when it sets none, and pollen reads every version up to the
+newest it knows, so an upgrade never breaks a config and a rename does not
+need an alias kept forever. The version moves only on a renamed or removed
+key or a change of meaning, never for a new optional key. An old version is
+deprecated, with a warning pointing to `pollen migrate`, only in a later
+release than its successor's, and dropped later still. `migrate` edits the
+file line by line like `autoupdate`, and writes it only if it loads to the
+same sources and targets. See
+[ADR 0003](docs/adr/0003-version-the-config-format.md).
 
 **No lockfile.** A lockfile exists to freeze what a resolver chose: version
 ranges and transitive dependencies. pollen has neither — a `revision` names one

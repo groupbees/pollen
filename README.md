@@ -89,15 +89,19 @@ for the platforms and the checksums, and
 A `pollen.yaml` in the working directory lists where the skills come from:
 
 ```yaml
+version: 2
 repos:
   - repo: https://github.com/toto/tata
     revision: 1.2.3
-    paths:
+    skills:
       - path: mydir/
   - repo: local
-    paths:
+    skills:
       - path: skills
 ```
+
+A file without `version` is in version 1, where those lists are called
+`paths`; `pollen migrate` rewrites it in the newest version.
 
 To see what a source provides before adding it — each skill's path and
 description, and the commit to pin:
@@ -147,7 +151,7 @@ pollen's errors. Install it with pollen itself:
 ```yaml
   - repo: https://github.com/groupbees/pollen
     revision: <sha>  # vX.Y.Z
-    paths:
+    skills:
       - path: skills
 ```
 

@@ -162,6 +162,19 @@ class DigestBump:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class Migration:
+    """What a migration of the config file changed, or would change."""
+
+    path: Path
+    from_version: int
+    """The format version the file was written in."""
+    to_version: int
+    """The format version it is in after the migration."""
+    written: bool
+    """Whether the file was rewritten: false on a dry run, or when already in the newest version."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class AutoupdateOutcome:
     """What an autoupdate changed, or would change."""
 

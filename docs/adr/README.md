@@ -8,3 +8,4 @@ system as it stands is described in [ARCHITECTURE.md](../../ARCHITECTURE.md).
 | --- | --- | --- |
 | [0001](0001-ship-python-bindings-built-with-pyo3.md) | Ship Python bindings built with PyO3 | accepted |
 | [0002](0002-fetch-skills-from-well-known-discovery-indexes.md) | Fetch skills from well-known discovery indexes over HTTP | accepted |
+| [0003](0003-version-the-config-format.md) | Version the config format, and parse it apart from running it | accepted |

@@ -214,7 +214,31 @@ def test_schema_is_the_json_schema_of_the_config() -> None:
     document = json.loads(pollen.schema())
 
     assert document["$id"].endswith("/schema/pollen.schema.json")
-    assert "repos" in document["properties"]
+    assert "repos" in document["$defs"]["V2"]["properties"]
+
+
+def test_migrate_rewrites_the_config_in_the_newest_version(
+    workspace: Path, cache_dir: Path
+) -> None:
+    before = pollen.validate(cache_dir=cache_dir)
+
+    migration = pollen.migrate()
+
+    assert (migration.from_version, migration.to_version, migration.written) == (1, 2, True)
+    text = (workspace / "pollen.yaml").read_text()
+    assert text.startswith("version: 2\n")
+    assert "paths:" not in text
+    assert pollen.validate(cache_dir=cache_dir).skills == before.skills
+    assert not pollen.migrate().written
+
+
+def test_migrate_dry_run_leaves_the_file_alone(workspace: Path) -> None:
+    before = (workspace / "pollen.yaml").read_text()
+
+    migration = pollen.migrate(dry_run=True)
+
+    assert (migration.to_version, migration.written) == (2, False)
+    assert (workspace / "pollen.yaml").read_text() == before
 
 
 def test_logs_reach_python_logging(

@@ -107,7 +107,8 @@ backdated tag passes. To read it, pollen fetches each candidate tag one commit
 deep into the cache.
 
 See what a git source provides before adding it to the config — each skill's
-path, in the form `paths:` takes, its description, and the commit to pin:
+path, in the form a `repo` entry's `skills:` takes, its description, and
+the commit to pin:
 
 ```sh
 pollen show https://github.com/groupbees/skills-opensource
@@ -167,8 +168,15 @@ fix pollen's errors the way this guide describes — add it as a source:
 ```yaml
   - repo: https://github.com/groupbees/pollen
     revision: <sha>  # vX.Y.Z
-    paths:
+    skills:
       - path: skills
+```
+
+Rewrite a config written in an older [format version](/reference/configuration/#format-versions)
+in the newest one, keeping its comments; `--dry-run` shows what it would do:
+
+```sh
+pollen migrate
 ```
 
 Refresh from the cache on a plane:

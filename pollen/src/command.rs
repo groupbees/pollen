@@ -2,12 +2,14 @@
 
 pub mod autoupdate;
 pub mod list;
+pub mod migrate;
 pub mod outdated;
 pub mod plan;
 pub mod schema;
 pub mod show;
 pub mod update;
 pub mod validate;
+mod yaml_lines;
 
 use std::path::PathBuf;
 

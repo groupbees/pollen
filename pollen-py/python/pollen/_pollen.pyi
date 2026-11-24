@@ -7,6 +7,7 @@ from pollen._types import (
     Deployed,
     DigestStatus,
     Listing,
+    Migration,
     Report,
     SourceStatus,
     Validation,
@@ -78,6 +79,14 @@ def autoupdate(
     min_release_age: timedelta | None = None,
 ) -> AutoupdateOutcome:
     """Move every git source to its newest release, and every pinned skill to its digest."""
+
+def migrate(
+    *,
+    config: StrPath | None = None,
+    global_: bool = False,
+    dry_run: bool = False,
+) -> Migration:
+    """Rewrite the config file in the newest format version."""
 
 def show(
     repo: str,
