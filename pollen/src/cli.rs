@@ -301,15 +301,11 @@ pub enum Command {
         min_release_age: Option<Duration>,
     },
 
-    /// Rewrite `pollen.yaml` in the newest format version.
-    ///
-    /// Comments and layout are kept, and the file is written only if it
-    /// declares the same sources and targets as before. A file already in the
-    /// newest version is left alone.
-    Migrate {
-        /// Show what would change without writing the file.
-        #[arg(long, env = "POLLEN_DRY_RUN")]
-        dry_run: bool,
+    /// Work on `pollen.yaml` itself.
+    Config {
+        /// What to do with the file.
+        #[command(subcommand)]
+        command: ConfigCommand,
     },
 
     /// List the skills a git source provides, before adding it to a config.
@@ -417,6 +413,21 @@ where
     }
 }
 
+/// The subcommands of `pollen config`.
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Rewrite `pollen.yaml` in the newest format version.
+    ///
+    /// Comments and layout are kept, and the file is written only if it
+    /// declares the same sources and targets as before. A file already in the
+    /// newest version is left alone.
+    Migrate {
+        /// Show what would change without writing the file.
+        #[arg(long, env = "POLLEN_DRY_RUN")]
+        dry_run: bool,
+    },
+}
+
 async fn run(cli: &Cli) -> Result<()> {
     let options = &cli.options;
     match &cli.command {
@@ -450,7 +461,9 @@ async fn run(cli: &Cli) -> Result<()> {
             dry_run,
             min_release_age,
         } => command::autoupdate::run(options, *freeze, *dry_run, *min_release_age).await,
-        Command::Migrate { dry_run } => command::migrate::run(options, *dry_run),
+        Command::Config {
+            command: ConfigCommand::Migrate { dry_run },
+        } => command::migrate::run(options, *dry_run),
         Command::Show {
             repo,
             revision,
@@ -568,6 +581,20 @@ mod tests {
         );
         assert_eq!(listed.options.clients(), repeated.options.clients());
         assert_eq!(all.options.clients(), Client::ALL);
+    }
+
+    #[test]
+    fn migrate_is_a_config_subcommand() {
+        let cli = Cli::parse_from(["pollen", "config", "migrate", "--dry-run", "-g"]);
+
+        assert!(matches!(
+            cli.command,
+            Command::Config {
+                command: ConfigCommand::Migrate { dry_run: true }
+            }
+        ));
+        assert!(cli.options.global);
+        assert!(Cli::try_parse_from(["pollen", "migrate"]).is_err());
     }
 
     #[test]

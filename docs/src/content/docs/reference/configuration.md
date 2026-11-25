@@ -102,12 +102,12 @@ removed, or changes meaning; a new optional key does not move it.
 | 1 | every release | The original format: a `repo` lists where to look under `paths`. |
 | 2 | pollen 0.8 and later | A `repo` lists where to look under `skills`, as a `well-known` source lists its skills. `clients` picks the clients to deploy for. |
 
-`pollen migrate` rewrites a file in the newest version, in place: comments and
-layout are kept, and the file is written only if it declares the same sources
-and targets as before. `--dry-run` shows what it would do.
+`pollen config migrate` rewrites a file in the newest version, in place:
+comments and layout are kept, and the file is written only if it declares the
+same sources and targets as before. `--dry-run` shows what it would do.
 
 ```console
-$ pollen migrate
+$ pollen config migrate
 pollen.yaml: migrated from version 1 to version 2
 ```
 

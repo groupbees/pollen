@@ -1,4 +1,4 @@
-//! `pollen migrate`: rewrite `pollen.yaml` in the newest format version, in
+//! `pollen config migrate`: rewrite `pollen.yaml` in the newest format version, in
 //! place.
 
 use std::path::PathBuf;

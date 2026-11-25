@@ -348,7 +348,7 @@ fn version_hint(text: &str, version: u32) -> Option<&'static str> {
     let document: serde_norway::Value = serde_norway::from_str(text).ok()?;
     if version == 1 && document.get("clients").is_some() {
         return Some(
-            "`clients` needs `version: 2`: take it out, run `pollen migrate`, then put it back",
+            "`clients` needs `version: 2`: take it out, run `pollen config migrate`, then put it back",
         );
     }
     let repos = document.get("repos")?.as_sequence()?;
