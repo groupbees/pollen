@@ -1,6 +1,6 @@
 ---
 name: pollen
-description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml or its credentials.yaml, migrating a pollen.yaml to the newest format version (pollen migrate), adding a well-known (LiteLLM, discovery index) source, seeing what skills a source provides before adding it (pollen show), adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning, skill refused for invisible characters).
+description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml or its credentials.yaml, migrating a pollen.yaml to the newest format version (pollen config migrate), adding a well-known (LiteLLM, discovery index) source, seeing what skills a source provides before adding it (pollen show), adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning, skill refused for invisible characters).
 ---
 
 # pollen
@@ -72,7 +72,7 @@ A `repo` lists where to look under `skills`, each with a `path`; a
 `well-known` origin (a LiteLLM gateway, a docs site) lists skills by `name`
 and takes no `revision`. A file without `version` is in version 1, where a
 `repo`'s list is called `paths`: keep editing it in its own version, or run
-`pollen migrate` first. A `well-known` origin's token goes in
+`pollen config migrate` first. A `well-known` origin's token goes in
 `~/.config/pollen/credentials.yaml`, never in `pollen.yaml`:
 
 ```yaml
@@ -111,7 +111,7 @@ pollen autoupdate [--freeze]        # bump every source (rewrites revision: line
 pollen autoupdate --freeze --min-release-age 7d   # only to releases at least 7 days old
 pollen validate [--config-only] [--pinned]   # check config and skills; --pinned requires commits
 pollen show <repo> [--revision R] [--path P] [--format json]   # what a source provides; writes nothing
-pollen migrate [--dry-run]          # rewrite pollen.yaml in the newest format version
+pollen config migrate [--dry-run]   # rewrite pollen.yaml in the newest format version
 ```
 
 `pollen validate --config-only --pinned` is offline: run it in CI or in the
@@ -125,7 +125,7 @@ pollen migrate [--dry-run]          # rewrite pollen.yaml in the newest format v
 | `… is managed by another config, …` | Declare the source in that config; `--force` hands the directory over |
 | `` `main` is a branch `` (warning) | Pin a tag, then `pollen autoupdate --freeze` |
 | `` unknown field `paths` `` in a `version: 2` file | Version 2 calls it `skills`; rename the key |
-| `` … or under `skills` with `version: 2` `` | A version 1 file uses `paths`; rename the key, or `pollen migrate` |
+| `` … or under `skills` with `version: 2` `` | A version 1 file uses `paths`; rename the key, or `pollen config migrate` |
 | `… this pollen reads versions 1 to N; upgrade pollen` | The file is newer than the installed pollen: upgrade it (see above) |
 | `two sources provide …` | Rename one skill, or `exclude` it in one source |
 | `` … is pinned to sha256:…, but the index publishes … `` | The publisher replaced the skill: `pollen outdated`, then `pollen autoupdate` |

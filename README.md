@@ -101,7 +101,7 @@ repos:
 ```
 
 A file without `version` is in version 1, where those lists are called
-`paths`; `pollen migrate` rewrites it in the newest version.
+`paths`; `pollen config migrate` rewrites it in the newest version.
 
 To see what a source provides before adding it — each skill's path and
 description, and the commit to pin:

@@ -179,7 +179,7 @@ Rewrite a config written in an older [format version](/reference/configuration/#
 in the newest one, keeping its comments; `--dry-run` shows what it would do:
 
 ```sh
-pollen migrate
+pollen config migrate
 ```
 
 Refresh from the cache on a plane:

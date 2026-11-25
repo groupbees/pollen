@@ -300,10 +300,10 @@ character (`⚠️`), a byte order mark opening a file.
 newest it knows, so an upgrade never breaks a config and a rename does not
 need an alias kept forever. The version moves only on a renamed or removed
 key or a change of meaning, never for a new optional key. An old version is
-deprecated, with a warning pointing to `pollen migrate`, only in a later
-release than its successor's, and dropped later still. `migrate` edits the
-file line by line like `autoupdate`, and writes it only if it loads to the
-same sources and targets. See
+deprecated, with a warning pointing to `pollen config migrate`, only in a
+later release than its successor's, and dropped later still. `config
+migrate` edits the file line by line like `autoupdate`, and writes it only if
+it loads to the same sources and targets. See
 [ADR 0003](docs/adr/0003-version-the-config-format.md).
 
 **No lockfile.** A lockfile exists to freeze what a resolver chose: version

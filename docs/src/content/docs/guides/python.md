@@ -90,7 +90,7 @@ the arguments instead.
 | `validate(config_only=False, pinned=False, allow_hidden_characters=False)` | `pollen validate` | `Validation` |
 | `outdated(min_release_age=None)` | `pollen outdated` | `list[SourceStatus \| DigestStatus]` |
 | `autoupdate(freeze=False, dry_run=False, min_release_age=None)` | `pollen autoupdate` | `AutoupdateOutcome` |
-| `migrate(dry_run=False)` | `pollen migrate` | `Migration` |
+| `migrate(dry_run=False)` | `pollen config migrate` | `Migration` |
 | `show(repo, revision=None, path=None)` | `pollen show` | `Listing` |
 | `schema()` | `pollen schema` | the JSON Schema, as a `str` |
 

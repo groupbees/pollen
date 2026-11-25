@@ -46,17 +46,19 @@ converted into the model every command runs on, `config::Config` and the
 and a combination the file format allows but means nothing, such as `paths`
 on a `well-known` source, cannot be represented in it.
 
-`pollen migrate` rewrites a file in the newest version, line by line as
-`autoupdate` does, so comments and layout survive, and writes it only if the
-result loads to the same sources and targets.
+`pollen config migrate` rewrites a file in the newest version, line by line
+as `autoupdate` does, so comments and layout survive, and writes it only if
+the result loads to the same sources and targets. It sits under `config`,
+with the commands that work on the file rather than on the skills, as
+`buf config migrate` does.
 
 The version moves only when a key is renamed or removed, or changes
 meaning. A new optional key, such as `agents:`, is added to the current
 version without moving it.
 
-An old version is deprecated, with a warning pointing to `pollen migrate`, in
-a release after the one that introduced its successor, and dropped only in
-a later release, never in the same one.
+An old version is deprecated, with a warning pointing to
+`pollen config migrate`, in a release after the one that introduced its
+successor, and dropped only in a later release, never in the same one.
 
 ## Consequences
 
