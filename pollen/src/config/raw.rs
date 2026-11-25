@@ -15,7 +15,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 
-use super::{IndexSelection, LOCAL_REPO, Repo, is_digest, normalize_origin};
+use super::{ClientChoice, IndexSelection, LOCAL_REPO, Repo, is_digest, normalize_origin};
 
 /// The newest format version this pollen reads.
 pub const LATEST: u32 = 2;
@@ -120,23 +120,59 @@ pub struct RepoV1 {
 /// `skills`, whatever kind of source it is.
 #[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[schemars(title = "pollen configuration, version 2")]
+#[schemars(
+    title = "pollen configuration, version 2",
+    extend("not" = serde_json::json!({"required": ["targets", "clients"]}))
+)]
 pub struct V2 {
     /// The format version of this file.
     #[schemars(extend("const" = 2))]
     pub version: u32,
-    /// Directories the skills are deployed into, each getting a full copy.
+    /// Directories the skills are deployed into, each getting a full copy,
+    /// instead of the skill directories of the `clients`.
     ///
     /// A relative path resolves against the working directory, and a leading
-    /// `~` is expanded. Defaults to `.claude/skills` and `.agents/skills`, or
-    /// to `~/.claude/skills` and `~/.agents/skills` with `--global`.
+    /// `~` is expanded. Forbidden with `clients`.
     #[validate(length(min = 1, message = "at least one target is required"))]
     #[schemars(length(min = 1))]
     pub targets: Option<Vec<PathBuf>>,
+    /// The clients the skills are deployed for, each through its own skill
+    /// directory: `all`, `claude` (`.claude/skills`) or `agent-skills`
+    /// (`.agents/skills`), one or a list.
+    ///
+    /// The directories are under the home directory with `--global`.
+    /// Defaults to `all`. Forbidden with `targets`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(function = check_clients))]
+    pub clients: Option<ClientList>,
     /// The sources to pull skills from.
     #[validate(length(min = 1, message = "at least one repo is required"), nested)]
     #[schemars(length(min = 1))]
     pub repos: Vec<RepoV2>,
+}
+
+/// The `clients` of a version 2 file: one choice, or a list of them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(
+    untagged,
+    expecting = "`clients` takes `all`, `claude` or `agent-skills`, or a list of them"
+)]
+pub enum ClientList {
+    /// A single choice.
+    One(ClientChoice),
+    /// Several choices.
+    Many(#[schemars(length(min = 1))] Vec<ClientChoice>),
+}
+
+impl ClientList {
+    /// The choices, however they are written.
+    #[must_use]
+    pub fn list(&self) -> &[ClientChoice] {
+        match self {
+            Self::One(choice) => std::slice::from_ref(choice),
+            Self::Many(choices) => choices,
+        }
+    }
 }
 
 /// One source of skills in version 2.
@@ -282,6 +318,7 @@ impl From<V1> for V2 {
         Self {
             version: 2,
             targets: v1.targets,
+            clients: None,
             repos: v1.repos.into_iter().map(RepoV2::from).collect(),
         }
     }
@@ -369,6 +406,13 @@ impl RepoV2 {
             },
         }
     }
+}
+
+fn check_clients(clients: &ClientList) -> Result<(), ValidationError> {
+    if clients.list().is_empty() {
+        return Err(named_error("clients", "at least one client is required"));
+    }
+    Ok(())
 }
 
 fn check_source_keys_v1(repo: &RepoV1) -> Result<(), ValidationError> {

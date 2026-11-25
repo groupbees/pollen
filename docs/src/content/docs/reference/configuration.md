@@ -34,7 +34,8 @@ where to look, by `path`, on a `repo`; skills of the index, by `name`, on a
 | Key | Required | Default | Description |
 | --- | --- | --- | --- |
 | `version` | no | `1` | The [format version](#format-versions) the file is written in. This page describes version 2. |
-| `targets` | no | `.claude/skills` and `.agents/skills`; with `--global`, `~/.claude/skills` and `~/.agents/skills` | Directories the skills are deployed into, each getting a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. |
+| `clients` | no | `all` | Version 2 only. The clients the skills are deployed for, as one value or a list: `all`, `claude` (`.claude/skills`) or `agent-skills` (`.agents/skills`, the directory every other Agent Skills client scans). The directories are in the working directory, or in the home directory with `--global`. Forbidden with `targets`. |
+| `targets` | no | — | Directories the skills are deployed into, instead of the `clients`' ones; each gets a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. Forbidden with `clients`. |
 | `repos[].repo` | unless `well-known` | — | A git URL, a path to a git repository, or `local` for the directory holding the config file. |
 | `repos[].revision` | for git | — | Tag, branch or commit to check out. A branch draws a warning, since each update deploys whatever it points to then; a full commit SHA is the only revision that cannot move (`pollen validate --pinned` enforces it). Forbidden on `local` and `well-known`. |
 | `repos[].skills[].path` | with `repo` | — | Directory to search, relative to the source root. Write it with `/`, which every platform reads. Forbidden on `well-known`. |
@@ -57,15 +58,21 @@ resolution. A child directory symlink resolving outside the root refuses the run
 Links within the root retain their selected name and path. Excluded candidates
 are not selected and do not enter this check.
 
-Set `targets` yourself to deploy elsewhere — a single directory, or the
-user-level pair, which is also what `--global` uses when the user-level config
-sets none:
+By default the skills go to both `.claude/skills` and `.agents/skills`. Set
+`clients` to deploy for some of them only — Claude Code alone, here, in the
+project or under the home directory with `--global`:
+
+```yaml
+version: 2
+clients: claude
+```
+
+Set `targets` instead to deploy into directories of your own:
 
 ```yaml
 version: 2
 targets:
-  - ~/.claude/skills
-  - ~/.agents/skills
+  - ~/team/skills
 ```
 
 A
@@ -93,7 +100,7 @@ removed, or changes meaning; a new optional key does not move it.
 | Version | Read by | Change |
 | --- | --- | --- |
 | 1 | every release | The original format: a `repo` lists where to look under `paths`. |
-| 2 | pollen 0.8 and later | A `repo` lists where to look under `skills`, as a `well-known` source lists its skills. |
+| 2 | pollen 0.8 and later | A `repo` lists where to look under `skills`, as a `well-known` source lists its skills. `clients` picks the clients to deploy for. |
 
 `pollen migrate` rewrites a file in the newest version, in place: comments and
 layout are kept, and the file is written only if it declares the same sources

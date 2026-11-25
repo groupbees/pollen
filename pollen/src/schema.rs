@@ -176,6 +176,35 @@ mod tests {
     }
 
     #[test]
+    fn accepts_clients() {
+        for clients in ["all", "claude", "[claude]", "[claude, agent-skills]"] {
+            let config = yaml(&format!(
+                "version: 2\nclients: {clients}\nrepos:\n  - repo: local\n    skills:\n      - path: .\n"
+            ));
+
+            assert!(validator().is_valid(&config), "{clients}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_clients_clients_with_targets_and_clients_in_version_one() {
+        for prefix in [
+            "clients: []\n",
+            "clients: cursor\n",
+            "clients: [cursor]\n",
+            "clients: all\ntargets: [skills]\n",
+        ] {
+            let config = yaml(&format!(
+                "version: 2\n{prefix}repos:\n  - repo: local\n    skills:\n      - path: .\n"
+            ));
+
+            assert!(!validator().is_valid(&config), "{prefix}");
+        }
+        let v1 = yaml("clients: claude\nrepos:\n  - repo: local\n    paths:\n      - path: .\n");
+        assert!(!validator().is_valid(&v1));
+    }
+
+    #[test]
     fn rejects_empty_lists() {
         assert!(!validator().is_valid(&yaml("repos: []\n")));
         assert!(!validator().is_valid(&yaml(

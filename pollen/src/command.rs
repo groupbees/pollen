@@ -42,7 +42,7 @@ impl Context {
     /// When the config file cannot be read, parsed or validated.
     pub fn open_at(options: &Options, config_path: &std::path::Path) -> anyhow::Result<Self> {
         let config = Config::load(config_path)?;
-        let targets = config.targets(&options.targets, options.default_targets());
+        let targets = config.targets(&options.targets, &options.clients(), options.global);
         tracing::debug!(
             targets = ?targets,
             config = %config_path.display(),
