@@ -110,6 +110,75 @@ async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
 }
 
 #[tokio::test]
+async fn a_migrated_config_deploys_what_its_version_one_did() {
+    let origin = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+
+    write_skill(&origin.path().join("skills/from-git"), "from-git");
+    commit_and_tag(origin.path(), "v1.0.0");
+    write_skill(&workspace.path().join("mine/from-local"), "from-local");
+
+    let config_path = workspace.path().join("pollen.yaml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "# Our skills.\n\
+             targets:\n\
+             \x20 - deployed\n\
+             repos:\n\
+             \x20 - repo: {origin}\n\
+             \x20   revision: v1.0.0  # pinned\n\
+             \x20   paths:\n\
+             \x20     - path: skills\n\
+             \x20 - repo: local\n\
+             \x20   paths:\n\
+             \x20     - path: mine\n",
+            origin = origin.path().display()
+        ),
+    )
+    .unwrap();
+    let target = workspace.path().join("deployed");
+    let v1 = Config::load(&config_path).unwrap();
+    let first = update(
+        &v1,
+        std::slice::from_ref(&target),
+        &fetcher_for(&v1, cache.path(), false),
+        false,
+        false,
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.count(Action::Added), 2);
+
+    let options = pollen::cli::Options {
+        config: config_path.clone(),
+        ..pollen::cli::Options::default()
+    };
+    let migration = pollen::command::migrate::apply(&options, false).unwrap();
+    assert_eq!((migration.from_version, migration.to_version), (1, 2));
+    let text = std::fs::read_to_string(&config_path).unwrap();
+    assert!(text.starts_with("# Our skills.\nversion: 2\n"), "{text}");
+    assert!(text.contains("revision: v1.0.0  # pinned"), "{text}");
+    assert!(!text.contains("paths:"), "{text}");
+
+    let v2 = Config::load(&config_path).unwrap();
+    let second = update(
+        &v2,
+        std::slice::from_ref(&target),
+        &fetcher_for(&v2, cache.path(), true),
+        false,
+        false,
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(v2.version, 2);
+    assert_eq!(second.count(Action::Unchanged), 2);
+}
+
+#[tokio::test]
 async fn a_moved_tag_reinstalls_the_skill() {
     let origin = tempfile::tempdir().unwrap();
     let workspace = tempfile::tempdir().unwrap();

@@ -9,7 +9,7 @@ use anyhow::{Result, bail};
 
 use crate::cli::Options;
 use crate::command::Context;
-use crate::config::{Config, RepoSpec, Source, is_commit_id};
+use crate::config::{Config, IndexSelection, Repo, is_commit_id};
 use crate::source::git;
 use crate::source::well_known::{CredentialsFile, WellKnown};
 use crate::version::{self, RemoteTag, Version};
@@ -254,14 +254,14 @@ pub async fn check(
     let well_known = WellKnown::new(cache_dir.to_owned(), false, credentials);
     let mut statuses = Vec::new();
     for repo in &config.repos {
-        let (url, revision) = match repo.source() {
-            Source::Git { url, revision } => (url, revision),
-            Source::WellKnown { origin } => {
-                let digests = digests(&well_known, repo, &origin, min_age.is_some()).await?;
+        let (url, revision) = match repo {
+            Repo::Git { url, revision, .. } => (url.clone(), revision.clone()),
+            Repo::WellKnown { origin, skills } => {
+                let digests = digests(&well_known, skills, origin, min_age.is_some()).await?;
                 statuses.extend(digests.into_iter().map(Entry::Digest));
                 continue;
             }
-            Source::Local => continue,
+            Repo::Local { .. } => continue,
         };
         let tags = git::remote_tags(&url, &config.base_dir).await?;
         let mut status = Status {
@@ -281,16 +281,16 @@ pub async fn check(
     Ok(statuses)
 }
 
-/// Where each skill `repo` lists stands against the index of `origin`. An
-/// entry without a `skills` list follows the index, so it has nothing to
+/// Where each skill `selection` lists stands against the index of `origin`.
+/// An entry without a `skills` list follows the index, so it has nothing to
 /// compare.
 async fn digests(
     well_known: &WellKnown,
-    repo: &RepoSpec,
+    selection: &IndexSelection,
     origin: &str,
     hold: bool,
 ) -> Result<Vec<DigestStatus>> {
-    let Some(pins) = &repo.skills else {
+    let IndexSelection::Only(pins) = selection else {
         return Ok(Vec::new());
     };
     let index = well_known.index(origin).await?;

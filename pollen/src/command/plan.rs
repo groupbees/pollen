@@ -92,7 +92,7 @@ pub async fn build(
                 )
             })
             .collect();
-        for spec in &repo.paths {
+        for spec in repo.paths() {
             for dir in discovery::discover(&root, spec)? {
                 let source_path = relative_slug(&root, &dir);
                 candidates.push((dir, source_path, None));
@@ -114,7 +114,7 @@ pub async fn build(
                 checksum: deploy::checksum(&dir)?,
                 source_dir: dir,
                 repo: repo.location(),
-                revision: repo.revision.clone(),
+                revision: repo.revision().map(str::to_owned),
                 commit: fetched.resolved.clone(),
                 digest,
             };

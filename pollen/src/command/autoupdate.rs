@@ -1,7 +1,7 @@
 //! `pollen autoupdate`: move every git source to its newest release, and
 //! every pinned `well-known` skill to its published digest, in place.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -11,7 +11,8 @@ use regex::Regex;
 use crate::cli::Options;
 use crate::command::Context;
 use crate::command::outdated::{self, DigestStatus, Entry, Status};
-use crate::config::{Config, Source, is_commit_id, normalize_origin};
+use crate::command::yaml_lines::{entries, items, stage};
+use crate::config::{IndexSelection, Repo, is_commit_id, normalize_origin};
 use crate::version::Version;
 
 /// One `revision:` to rewrite.
@@ -127,8 +128,10 @@ pub async fn apply(
     let context = Context::open(options)?;
     if freeze {
         for repo in &context.config.repos {
-            if let Source::WellKnown { origin } = repo.source()
-                && repo.skills.is_none()
+            if let Repo::WellKnown {
+                origin,
+                skills: IndexSelection::All { .. },
+            } = repo
             {
                 tracing::warn!(
                     "{origin}: takes every skill of its index, so there is no digest to pin; list the skills under `skills` to pin them"
@@ -159,7 +162,7 @@ pub async fn apply(
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("cannot read {}", path.display()))?;
         let text = rewrite_digests(&rewrite(&text, &bumps)?, &digests)?;
-        write_checked(&path, &text)?;
+        stage(&path, &text)?.persist(&path)?;
     }
     Ok(Outcome {
         path,
@@ -263,8 +266,6 @@ static NAME_LINE: LazyLock<Regex> = LazyLock::new(|| {
 static DIGEST_LINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^(\s*(?:-\s+)?digest:\s*)["']?[^"'#\s]+["']?(\s*#.*)?$"#).expect("valid regex")
 });
-static ITEM_START: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)-\s").expect("valid regex"));
 
 /// Apply `bumps` to the text of a `pollen.yaml`, line by line, so comments and
 /// layout survive.
@@ -320,46 +321,6 @@ pub fn rewrite(text: &str, bumps: &[Bump]) -> Result<String> {
         );
     }
     Ok(out.concat())
-}
-
-/// The `[start, end)` line ranges of the items under `repos:`.
-fn entries(lines: &[&str]) -> Vec<(usize, usize)> {
-    lines
-        .iter()
-        .position(|line| line.trim_end().starts_with("repos:"))
-        .map_or_else(Vec::new, |repos| items(lines, repos, lines.len(), 0))
-}
-
-/// The `[start, end)` line ranges of the items of the block list whose key
-/// is on line `header`, at column `key`, looking no further than `limit`.
-fn items(lines: &[&str], header: usize, limit: usize, key: usize) -> Vec<(usize, usize)> {
-    let mut item_indent = None;
-    let mut starts = Vec::new();
-    let mut end = limit;
-    for (index, line) in lines.iter().enumerate().take(limit).skip(header + 1) {
-        let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let indent = line.len() - trimmed.len();
-        if let Some(caps) = ITEM_START.captures(line) {
-            let this = caps[1].len();
-            if item_indent.map_or(this >= key, |known| known == this) {
-                item_indent = Some(this);
-                starts.push(index);
-                continue;
-            }
-        }
-        if item_indent.is_none_or(|known| indent <= known) {
-            end = index;
-            break;
-        }
-    }
-    starts
-        .iter()
-        .enumerate()
-        .map(|(position, &start)| (start, starts.get(position + 1).copied().unwrap_or(end)))
-        .collect()
 }
 
 /// Apply `bumps` to the text of a `pollen.yaml`, line by line, as
@@ -438,28 +399,10 @@ pub fn rewrite_digests(text: &str, bumps: &[DigestBump]) -> Result<String> {
     Ok(out.concat())
 }
 
-/// Write `text` to `path` only if it still parses as a valid config.
-fn write_checked(path: &Path, text: &str) -> Result<()> {
-    let directory = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let staging = tempfile::Builder::new()
-        .prefix(".pollen-config-")
-        .suffix(".yaml")
-        .tempfile_in(directory)
-        .with_context(|| format!("cannot write into {}", directory.display()))?;
-    std::fs::write(staging.path(), text)?;
-    Config::load(staging.path()).context("the rewritten config is invalid; nothing was written")?;
-    staging
-        .persist(path)
-        .with_context(|| format!("cannot write {}", path.display()))?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
 
     const SHA: &str = "acad0f52027cf8f8edf7bfa6a55e13c594d8ee71";
 
@@ -505,6 +448,29 @@ repos:
         .unwrap();
 
         assert_eq!(out, CONFIG.replace("revision: v0.1.0", "revision: v0.2.0"));
+    }
+
+    #[test]
+    fn bumps_a_revision_and_a_digest_in_a_version_two_file() {
+        let text = format!(
+            "version: 2\nrepos:\n  - repo: https://x.example/a.git\n    revision: v0.1.0\n    skills:\n      - path: skills\n  - well-known: https://gateway.example.com\n    skills:\n      - name: pinned\n        digest: {OLD}\n"
+        );
+
+        let out = rewrite_digests(
+            &rewrite(
+                &text,
+                &[bump("https://x.example/a.git", "v0.1.0", "v0.2.0", None)],
+            )
+            .unwrap(),
+            &[digest_bump("pinned", Some(OLD))],
+        )
+        .unwrap();
+
+        assert_eq!(out, text.replace("v0.1.0", "v0.2.0").replace(OLD, NEW));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pollen.yaml");
+        std::fs::write(&path, &out).unwrap();
+        assert_eq!(Config::load(&path).unwrap().version, 2);
     }
 
     #[test]

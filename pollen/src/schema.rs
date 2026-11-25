@@ -2,9 +2,10 @@
 //! can validate a config without running pollen.
 
 use anyhow::Result;
+use schemars::generate::SchemaSettings;
 use serde_json::{Value, json};
 
-use crate::config::Config;
+use crate::config::raw;
 
 /// Where the published schema is served from.
 pub const SCHEMA_ID: &str =
@@ -14,18 +15,29 @@ pub const SCHEMA_ID: &str =
 pub const SCHEMA_PATH: &str = "schema/pollen.schema.json";
 
 /// Build the JSON Schema document describing `pollen.yaml`.
+///
+/// One document covers every format version, so the published URL keeps
+/// validating files written in an older one: a file declaring `version: 2`
+/// is checked against version 2, any other against version 1, the version
+/// of a file that sets none.
 #[must_use]
 pub fn document() -> Value {
-    let mut schema = schemars::schema_for!(Config);
-    let object = schema.ensure_object();
-    object.insert("$id".to_owned(), json!(SCHEMA_ID));
-    object.insert(
-        "description".to_owned(),
-        json!(
-            "Declares where Agent Skills come from and which directories they are deployed into."
-        ),
-    );
-    schema.to_value()
+    let mut generator = SchemaSettings::default().into_generator();
+    let v1 = generator.subschema_for::<raw::V1>();
+    let v2 = generator.subschema_for::<raw::V2>();
+    let definitions = generator.take_definitions(true);
+    let mut document = json!({
+        "$schema": generator.settings().meta_schema,
+        "$id": SCHEMA_ID,
+        "title": "pollen configuration",
+        "description": "Declares where Agent Skills come from and which directories they are deployed into.",
+        "type": "object",
+        "if": {"required": ["version"], "properties": {"version": {"const": 2}}},
+        "then": v2,
+        "else": v1,
+    });
+    document["$defs"] = Value::Object(definitions);
+    document
 }
 
 /// Render the document exactly as the committed copy is stored.
@@ -122,6 +134,34 @@ mod tests {
             "repos:\n  - well-known: https://x.example\n    exclude: ^a\n    skills:\n      - name: a\n",
             "repos:\n  - repo: local\n    exclude: ^a\n    paths:\n      - path: .\n",
             "repos:\n  - well-known: https://x.example\n    skills:\n      - name: a\n        digest: sha256:00\n",
+        ] {
+            assert!(!validator().is_valid(&yaml(config)), "{config}");
+        }
+    }
+
+    #[test]
+    fn accepts_both_versions_of_the_format() {
+        for config in [
+            "version: 1\nrepos:\n  - repo: local\n    paths:\n      - path: skills\n",
+            "version: 2\nrepos:\n  - repo: local\n    skills:\n      - path: skills\n        recurse: true\n",
+            "version: 2\nrepos:\n  - repo: https://x.example/a.git\n    revision: v1\n    skills:\n      - path: .\n",
+            "version: 2\nrepos:\n  - well-known: https://x.example\n    skills:\n      - name: a\n",
+            "version: 2\nrepos:\n  - well-known: https://x.example\n    exclude: ^a\n",
+        ] {
+            assert!(validator().is_valid(&yaml(config)), "{config}");
+        }
+    }
+
+    #[test]
+    fn checks_each_version_against_its_own_keys() {
+        for config in [
+            "version: 2\nrepos:\n  - repo: local\n    paths:\n      - path: .\n",
+            "repos:\n  - repo: local\n    skills:\n      - path: .\n",
+            "version: 2\nrepos:\n  - repo: local\n    skills:\n      - name: a\n",
+            "version: 2\nrepos:\n  - well-known: https://x.example\n    skills:\n      - path: .\n",
+            "version: 2\nrepos:\n  - repo: local\n",
+            "version: 3\nrepos:\n  - repo: local\n    skills:\n      - path: .\n",
+            "version: \"2\"\nrepos:\n  - repo: local\n    skills:\n      - path: .\n",
         ] {
             assert!(!validator().is_valid(&yaml(config)), "{config}");
         }

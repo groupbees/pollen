@@ -18,7 +18,7 @@ Every option is also an environment variable:
 | `POLLEN_CACHE_DIR` | no | `<cache>/pollen` | Where the git checkouts, discovery indexes and skill artifacts are kept between runs. |
 | `POLLEN_OFFLINE` | no | `false` | Work from the cache only, contacting no remote. |
 | `POLLEN_CREDENTIALS_FILE` | no | `<config>/pollen/credentials.yaml` | The [credentials file](/guides/well-known-sources/#authentication) for `well-known` origins, as `--credentials-file` does. A file named here must exist. |
-| `POLLEN_DRY_RUN` | no | `false` | Report what `update` or `autoupdate` would change, and stop. |
+| `POLLEN_DRY_RUN` | no | `false` | Report what `update`, `autoupdate` or `migrate` would change, and stop. |
 | `POLLEN_FORCE` | no | `false` | Let `update` take over a directory it did not install. |
 | `POLLEN_ALLOW_HIDDEN_CHARACTERS` | no | `false` | Let `update` and `validate` accept a skill whose files hold invisible characters, with a warning for each file. |
 | `POLLEN_LOG_FILTER` | no | `warn` | `tracing` filter directive, e.g. `info` to follow each skill as it is installed, or `pollen=debug`. |

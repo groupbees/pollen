@@ -1,6 +1,6 @@
 ---
 name: pollen
-description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml or its credentials.yaml, adding a well-known (LiteLLM, discovery index) source, seeing what skills a source provides before adding it (pollen show), adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning, skill refused for invisible characters).
+description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml or its credentials.yaml, migrating a pollen.yaml to the newest format version (pollen migrate), adding a well-known (LiteLLM, discovery index) source, seeing what skills a source provides before adding it (pollen show), adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning, skill refused for invisible characters).
 ---
 
 # pollen
@@ -45,16 +45,17 @@ to that config; `--force` only to hand the directory over on purpose.
 ## pollen.yaml
 
 ```yaml
+version: 2                                   # absent: version 1, see below
 repos:
   - repo: git@github.com:org/skills.git      # SSH for private repos
     revision: 4e1e8e25a2f32d8311cd52c5d9a703bad990e525  # v0.2.0
-    paths:
+    skills:
       - path: skills/docker                  # immediate children
       - path: skills
         recurse: true                        # the whole tree
         exclude: ^terraform/                 # regex on the path under `path`
   - repo: local                              # paths next to this file
-    paths:
+    skills:
       - path: .skills
   - well-known: https://gateway.example.com  # serves /.well-known/agent-skills/index.json
     skills:                                  # or `exclude: <regex>` to take the rest
@@ -62,9 +63,12 @@ repos:
         digest: sha256:<64 hex>              # the pin; autoupdate --freeze writes it
 ```
 
-A `well-known` origin (a LiteLLM gateway, a docs site) takes no `revision` or
-`paths`. Its token goes in `~/.config/pollen/credentials.yaml`, never in
-`pollen.yaml`:
+A `repo` lists where to look under `skills`, each with a `path`; a
+`well-known` origin (a LiteLLM gateway, a docs site) lists skills by `name`
+and takes no `revision`. A file without `version` is in version 1, where a
+`repo`'s list is called `paths`: keep editing it in its own version, or run
+`pollen migrate` first. A `well-known` origin's token goes in
+`~/.config/pollen/credentials.yaml`, never in `pollen.yaml`:
 
 ```yaml
 credentials:
@@ -76,7 +80,7 @@ credentials:
 
 Skills deploy flat under their folder name, so names must be unique across
 sources. Before adding a source, `pollen show <repo>` lists its skills — the
-`path` to put under `paths:`, each description — and prints the
+`path` to put under `skills:`, each description — and prints the
 `revision: <sha>  # vX.Y.Z` line to paste.
 
 ## Pin a commit, not a branch — and no lockfile
@@ -102,6 +106,7 @@ pollen autoupdate [--freeze]        # bump every source (rewrites revision: line
 pollen autoupdate --freeze --min-release-age 7d   # only to releases at least 7 days old
 pollen validate [--config-only] [--pinned]   # check config and skills; --pinned requires commits
 pollen show <repo> [--revision R] [--path P] [--format json]   # what a source provides; writes nothing
+pollen migrate [--dry-run]          # rewrite pollen.yaml in the newest format version
 ```
 
 `pollen validate --config-only --pinned` is offline: run it in CI or in the
@@ -114,6 +119,9 @@ pollen show <repo> [--revision R] [--path P] [--format json]   # what a source p
 | `… already exists and pollen did not install it` | A hand-written or legacy copy: move it aside, or `--force` to take it over |
 | `… is managed by another config, …` | Declare the source in that config; `--force` hands the directory over |
 | `` `main` is a branch `` (warning) | Pin a tag, then `pollen autoupdate --freeze` |
+| `` unknown field `paths` `` in a `version: 2` file | Version 2 calls it `skills`; rename the key |
+| `` … or under `skills` with `version: 2` `` | A version 1 file uses `paths`; rename the key, or `pollen migrate` |
+| `… this pollen reads versions 1 to N; upgrade pollen` | The file is newer than the installed pollen: upgrade it (see above) |
 | `two sources provide …` | Rename one skill, or `exclude` it in one source |
 | `` … is pinned to sha256:…, but the index publishes … `` | The publisher replaced the skill: `pollen outdated`, then `pollen autoupdate` |
 | `… requires authentication (401 …)` | Add the origin to `~/.config/pollen/credentials.yaml` |

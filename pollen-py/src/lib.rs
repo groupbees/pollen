@@ -383,6 +383,27 @@ fn digest_bump<'py>(py: Python<'py>, bump: &DigestBump) -> PyResult<Bound<'py, P
     })
 }
 
+/// Rewrite the config file in the newest format version, unless `dry_run`.
+#[pyfunction]
+#[pyo3(signature = (*, config=None, global_=false, dry_run=false))]
+fn migrate(
+    py: Python<'_>,
+    config: Option<PathBuf>,
+    global_: bool,
+    dry_run: bool,
+) -> PyResult<Bound<'_, PyAny>> {
+    let options = options(config, global_, None, None, false, None)?;
+    let migration = py
+        .detach(|| command::migrate::apply(&options, dry_run))
+        .map_err(|error| PollenError::new_err(format!("{error:#}")))?;
+    record!(py, "Migration" {
+        path: &migration.path,
+        from_version: migration.from_version,
+        to_version: migration.to_version,
+        written: migration.written,
+    })
+}
+
 /// List the skills a git source provides, at its newest release unless
 /// `revision` names another, under `path` when given.
 #[pyfunction]
@@ -462,6 +483,7 @@ fn _pollen(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(validate, module)?)?;
     module.add_function(wrap_pyfunction!(outdated, module)?)?;
     module.add_function(wrap_pyfunction!(autoupdate, module)?)?;
+    module.add_function(wrap_pyfunction!(migrate, module)?)?;
     module.add_function(wrap_pyfunction!(show, module)?)?;
     module.add_function(wrap_pyfunction!(schema, module)?)?;
     module.add_function(wrap_pyfunction!(main, module)?)?;

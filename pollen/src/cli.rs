@@ -272,10 +272,21 @@ pub enum Command {
         min_release_age: Option<Duration>,
     },
 
+    /// Rewrite `pollen.yaml` in the newest format version.
+    ///
+    /// Comments and layout are kept, and the file is written only if it
+    /// declares the same sources and targets as before. A file already in the
+    /// newest version is left alone.
+    Migrate {
+        /// Show what would change without writing the file.
+        #[arg(long, env = "POLLEN_DRY_RUN")]
+        dry_run: bool,
+    },
+
     /// List the skills a git source provides, before adding it to a config.
     ///
     /// Reads the newest release unless `--revision` names another, and prints
-    /// each skill's path (the form `paths:` takes) and description, then the
+    /// each skill's path (the form a `repo` entry's `skills:` takes) and description, then the
     /// commit to pin. Writes nothing.
     Show {
         /// A git URL or a path to a git repository, as in `repo:`.
@@ -410,6 +421,7 @@ async fn run(cli: &Cli) -> Result<()> {
             dry_run,
             min_release_age,
         } => command::autoupdate::run(options, *freeze, *dry_run, *min_release_age).await,
+        Command::Migrate { dry_run } => command::migrate::run(options, *dry_run),
         Command::Show {
             repo,
             revision,

@@ -397,7 +397,7 @@ fn install(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{PathSpec, RepoSpec};
+    use crate::config::{PathSpec, Repo};
     use crate::source::{Materialized, MockMaterializer};
     use crate::state::State;
 
@@ -413,17 +413,17 @@ mod tests {
 
     fn config_with(repo_count: usize) -> Config {
         Config {
+            version: 2,
             targets: None,
             repos: (0..repo_count)
-                .map(|index| RepoSpec {
-                    repo: Some(format!("https://example.invalid/{index}.git")),
-                    revision: Some("1.0.0".to_owned()),
+                .map(|index| Repo::Git {
+                    url: format!("https://example.invalid/{index}.git"),
+                    revision: "1.0.0".to_owned(),
                     paths: vec![PathSpec {
                         path: PathBuf::from("skills"),
                         recurse: false,
                         exclude: None,
                     }],
-                    ..RepoSpec::default()
                 })
                 .collect(),
             base_dir: PathBuf::new(),
