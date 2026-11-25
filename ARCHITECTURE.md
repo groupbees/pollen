@@ -46,10 +46,11 @@ to a module under [pollen/src/](pollen/src/), except the last.
   version through each newer one, into the model every command reads:
   `Config` and the `Repo` enum (`Local`, `Git`, `WellKnown`), where a key
   that does not belong to its kind of source cannot be represented. It
-  resolves the target directories from the CLI overrides, the
-  config, then the default pair (in the working directory, or in the home
-  directory with `--global`, which also reads the user-level config),
-  dropping duplicates. It knows nothing about
+  resolves the target directories from the CLI's `--target`, else its
+  `--client`, else the config's `targets`, else the skill directory of each
+  of its `clients` — all of them by default — in the working directory, or
+  in the home directory with `--global`, which also reads the user-level
+  config; duplicates are dropped. It knows nothing about
   git or the filesystem beyond reading its own file.
 - **[source](pollen/src/source.rs)** — turns one `repos:` entry into a directory on
   disk, behind the `Materializer` trait. `local` resolves to the config

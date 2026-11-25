@@ -1,5 +1,42 @@
 {
   "$defs": {
+    "ClientChoice": {
+      "description": "A client named in the config or on the command line: one client, or all\nof them.",
+      "oneOf": [
+        {
+          "const": "claude",
+          "description": "Claude Code, into `.claude/skills`.",
+          "type": "string"
+        },
+        {
+          "const": "agent-skills",
+          "description": "Every other Agent Skills client, into `.agents/skills`.",
+          "type": "string"
+        },
+        {
+          "const": "all",
+          "description": "Every client pollen knows.",
+          "type": "string"
+        }
+      ]
+    },
+    "ClientList": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClientChoice",
+          "description": "A single choice."
+        },
+        {
+          "description": "Several choices.",
+          "items": {
+            "$ref": "#/$defs/ClientChoice"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      ],
+      "description": "The `clients` of a version 2 file: one choice, or a list of them."
+    },
     "PathSpec": {
       "additionalProperties": false,
       "description": "One place to look for skills inside a source.",
@@ -344,7 +381,24 @@
     "V2": {
       "additionalProperties": false,
       "description": "A `pollen.yaml` in format version 2: a source lists what it takes under\n`skills`, whatever kind of source it is.",
+      "not": {
+        "required": [
+          "targets",
+          "clients"
+        ]
+      },
       "properties": {
+        "clients": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The clients the skills are deployed for, each through its own skill\ndirectory: `all`, `claude` (`.claude/skills`) or `agent-skills`\n(`.agents/skills`), one or a list.\n\nThe directories are under the home directory with `--global`.\nDefaults to `all`. Forbidden with `targets`."
+        },
         "repos": {
           "description": "The sources to pull skills from.",
           "items": {
@@ -354,7 +408,7 @@
           "type": "array"
         },
         "targets": {
-          "description": "Directories the skills are deployed into, each getting a full copy.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded. Defaults to `.claude/skills` and `.agents/skills`, or\nto `~/.claude/skills` and `~/.agents/skills` with `--global`.",
+          "description": "Directories the skills are deployed into, each getting a full copy,\ninstead of the skill directories of the `clients`.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded. Forbidden with `clients`.",
           "items": {
             "type": "string"
           },

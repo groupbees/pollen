@@ -415,6 +415,7 @@ mod tests {
         Config {
             version: 2,
             targets: None,
+            clients: None,
             repos: (0..repo_count)
                 .map(|index| Repo::Git {
                     url: format!("https://example.invalid/{index}.git"),
