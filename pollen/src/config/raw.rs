@@ -116,13 +116,18 @@ pub struct RepoV1 {
     pub skills: Option<Vec<SkillPin>>,
 }
 
-/// A `pollen.yaml` in format version 2: a source lists what it takes under
-/// `skills`, whatever kind of source it is.
+/// A `pollen.yaml` in format version 2: a `repo` lists where to look under
+/// `skills`, and the origins serving a discovery index have a list of their
+/// own, `discovery`.
 #[derive(Debug, Clone, Deserialize, Serialize, Validate, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[validate(schema(function = check_sources_v2))]
 #[schemars(
     title = "pollen configuration, version 2",
-    extend("not" = serde_json::json!({"required": ["targets", "clients"]}))
+    extend(
+        "not" = serde_json::json!({"required": ["targets", "clients"]}),
+        "anyOf" = serde_json::json!([{"required": ["repos"]}, {"required": ["discovery"]}])
+    )
 )]
 pub struct V2 {
     /// The format version of this file.
@@ -145,10 +150,18 @@ pub struct V2 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(custom(function = check_clients))]
     pub clients: Option<ClientList>,
-    /// The sources to pull skills from.
+    /// The git repositories, and the config file's own directory, to pull
+    /// skills from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(length(min = 1, message = "at least one repo is required"), nested)]
     #[schemars(length(min = 1))]
-    pub repos: Vec<RepoV2>,
+    pub repos: Option<Vec<RepoV2>>,
+    /// The origins serving an Agent Skills discovery index to pull skills
+    /// from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(length(min = 1, message = "at least one origin is required"), nested)]
+    #[schemars(length(min = 1))]
+    pub discovery: Option<Vec<DiscoveryV2>>,
 }
 
 /// The `clients` of a version 2 file: one choice, or a list of them.
@@ -175,100 +188,57 @@ impl ClientList {
     }
 }
 
-/// One source of skills in version 2.
+/// A git repository, or the config file's own directory, in version 2.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, Validate, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[validate(schema(function = check_source_keys_v2, skip_on_field_errors = true))]
-#[schemars(extend("oneOf" = serde_json::json!([
-    {
-        "required": ["repo", "skills"],
-        "properties": {
-            "well-known": false,
-            "exclude": false,
-            "skills": {"items": {"$ref": "#/$defs/PathSpec"}}
-        },
-        "if": {"properties": {"repo": {"const": LOCAL_REPO}}},
-        "then": {"properties": {"revision": false}},
-        "else": {
-            "required": ["revision"],
-            "properties": {"revision": {"type": "string", "minLength": 1}}
-        }
-    },
-    {
-        "required": ["well-known"],
-        "properties": {
-            "repo": false,
-            "revision": false,
-            "skills": {"items": {"$ref": "#/$defs/SkillPin"}}
-        },
-        "not": {"required": ["exclude", "skills"]}
-    }
-])))]
+#[validate(schema(function = check_repo_v2, skip_on_field_errors = true))]
+#[schemars(extend(
+    "if" = serde_json::json!({"properties": {"repo": {"const": LOCAL_REPO}}}),
+    "then" = serde_json::json!({"properties": {"revision": false}}),
+    "else" = serde_json::json!({
+        "required": ["revision"],
+        "properties": {"revision": {"type": "string", "minLength": 1}}
+    })
+))]
 pub struct RepoV2 {
     /// A git URL, a path to a git repository, or `local` for the directory
     /// holding this config file.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(length(min = 1, message = "must not be empty"))]
-    #[schemars(with = "String", length(min = 1))]
-    pub repo: Option<String>,
-    /// An `https://` origin serving `/.well-known/agent-skills/index.json`,
-    /// whose skills are downloaded and checked against the index's digests.
-    #[serde(
-        rename = "well-known",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[validate(custom(function = check_origin))]
-    #[schemars(with = "String", extend("format" = "uri"))]
-    pub well_known: Option<String>,
+    #[schemars(length(min = 1))]
+    pub repo: String,
     /// The git revision to check out: a tag, a branch or a commit.
     ///
-    /// Required for a git source, and forbidden on `local` and `well-known`.
+    /// Required for a git source, and forbidden on `local`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
-    /// Regular expression rejecting the skills of a `well-known` index whose
-    /// name matches. Only with every skill of the index, not with `skills`.
+    /// Where to look for skills inside the source.
+    #[validate(length(min = 1, message = "at least one skill is required"), nested)]
+    #[schemars(length(min = 1))]
+    pub skills: Vec<PathSpec>,
+}
+
+/// An origin serving an Agent Skills discovery index, in version 2.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, Validate, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[validate(schema(function = check_discovery_v2, skip_on_field_errors = true))]
+#[schemars(extend("not" = serde_json::json!({"required": ["exclude", "skills"]})))]
+pub struct DiscoveryV2 {
+    /// An `https://` origin serving `/.well-known/agent-skills/index.json`,
+    /// whose skills are downloaded and checked against the index's digests.
+    #[validate(custom(function = check_url))]
+    #[schemars(extend("format" = "uri"))]
+    pub url: String,
+    /// Regular expression rejecting the skills of the index whose name
+    /// matches. Only with every skill of the index, not with `skills`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(custom(function = check_regex))]
     #[schemars(extend("format" = "regex"))]
     pub exclude: Option<String>,
-    /// What to take from the source: on a `repo`, where to look for skills,
-    /// each with a `path`; on a `well-known` origin, the skills of its index
-    /// by `name`, instead of all of them.
+    /// The skills to take from the index, instead of all of them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(length(min = 1, message = "at least one skill is required"), nested)]
     #[schemars(length(min = 1))]
-    pub skills: Option<Vec<SkillV2>>,
-}
-
-/// One item of a version 2 `skills` list: where to look on a `repo`, a skill
-/// of the index on a `well-known` origin. Which keys belong to which is
-/// checked against the kind of source, so the message can say why.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, Validate, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SkillV2 {
-    /// Directory to search, relative to the source root (`repo` only).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(custom(function = check_contained_path))]
-    pub path: Option<PathBuf>,
-    /// Search the whole subtree rather than only the immediate children
-    /// (`repo` only).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recurse: Option<bool>,
-    /// Regular expression rejecting skills whose path under `path` matches
-    /// (`repo` only).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(custom(function = check_regex))]
-    #[schemars(extend("format" = "regex"))]
-    pub exclude: Option<String>,
-    /// The skill's name in the index (`well-known` only).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(custom(function = crate::skill::validate_name))]
-    pub name: Option<String>,
-    /// The SHA-256 of the artifact to deploy (`well-known` only).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(custom(function = check_digest))]
-    pub digest: Option<String>,
+    pub skills: Option<Vec<SkillPin>>,
 }
 
 /// One skill taken from a `well-known` index.
@@ -312,54 +282,48 @@ pub struct PathSpec {
 }
 
 impl From<V1> for V2 {
-    /// A validated version 1 file, said in version 2: `paths` moves under
-    /// `skills`.
+    /// A validated version 1 file, said in version 2: a `repo`'s `paths`
+    /// move under `skills`, and each `well-known` entry moves to `discovery`.
     fn from(v1: V1) -> Self {
+        let mut repos = Vec::new();
+        let mut discovery = Vec::new();
+        for entry in v1.repos {
+            match (entry.repo, entry.well_known) {
+                (Some(repo), _) => repos.push(RepoV2 {
+                    repo,
+                    revision: entry.revision,
+                    skills: entry.paths,
+                }),
+                (None, Some(url)) => discovery.push(DiscoveryV2 {
+                    url,
+                    exclude: entry.exclude,
+                    skills: entry.skills,
+                }),
+                (None, None) => {}
+            }
+        }
         Self {
             version: 2,
             targets: v1.targets,
             clients: None,
-            repos: v1.repos.into_iter().map(RepoV2::from).collect(),
+            repos: (!repos.is_empty()).then_some(repos),
+            discovery: (!discovery.is_empty()).then_some(discovery),
         }
     }
 }
 
-impl From<RepoV1> for RepoV2 {
-    fn from(repo: RepoV1) -> Self {
-        let skills = if repo.repo.is_some() {
-            Some(repo.paths.into_iter().map(SkillV2::from).collect())
-        } else {
-            repo.skills
-                .map(|pins| pins.into_iter().map(SkillV2::from).collect())
-        };
-        Self {
-            repo: repo.repo,
-            well_known: repo.well_known,
-            revision: repo.revision,
-            exclude: repo.exclude,
-            skills,
-        }
-    }
-}
-
-impl From<PathSpec> for SkillV2 {
-    fn from(spec: PathSpec) -> Self {
-        Self {
-            path: Some(spec.path),
-            recurse: Some(spec.recurse),
-            exclude: spec.exclude,
-            ..Self::default()
-        }
-    }
-}
-
-impl From<SkillPin> for SkillV2 {
-    fn from(pin: SkillPin) -> Self {
-        Self {
-            name: Some(pin.name),
-            digest: pin.digest,
-            ..Self::default()
-        }
+impl V2 {
+    /// The sources of a validated file, in the model: the `repos` first,
+    /// then the `discovery` origins, each list in the order it is written.
+    #[must_use]
+    pub fn into_sources(self) -> Vec<Repo> {
+        let repos = self.repos.into_iter().flatten().map(RepoV2::into_model);
+        let discovery = self
+            .discovery
+            .into_iter()
+            .flatten()
+            .map(DiscoveryV2::into_model);
+        repos.chain(discovery).collect()
     }
 }
 
@@ -367,43 +331,31 @@ impl RepoV2 {
     /// The model of a validated entry.
     #[must_use]
     pub fn into_model(self) -> Repo {
-        let skills = self.skills.unwrap_or_default();
-        if let Some(origin) = self.well_known {
-            let skills = if skills.is_empty() {
-                IndexSelection::All {
-                    exclude: self.exclude,
-                }
-            } else {
-                IndexSelection::Only(
-                    skills
-                        .into_iter()
-                        .map(|skill| SkillPin {
-                            name: skill.name.unwrap_or_default(),
-                            digest: skill.digest,
-                        })
-                        .collect(),
-                )
-            };
-            return Repo::WellKnown {
-                origin: normalize_origin(&origin).unwrap_or(origin),
-                skills,
-            };
-        }
-        let paths = skills
-            .into_iter()
-            .map(|skill| PathSpec {
-                path: skill.path.unwrap_or_default(),
-                recurse: skill.recurse.unwrap_or(false),
-                exclude: skill.exclude,
-            })
-            .collect();
-        match self.repo.as_deref() {
-            Some(LOCAL_REPO) => Repo::Local { paths },
-            repo => Repo::Git {
-                url: repo.unwrap_or_default().to_owned(),
+        if self.repo == LOCAL_REPO {
+            Repo::Local { paths: self.skills }
+        } else {
+            Repo::Git {
+                url: self.repo,
                 revision: self.revision.unwrap_or_default(),
-                paths,
+                paths: self.skills,
+            }
+        }
+    }
+}
+
+impl DiscoveryV2 {
+    /// The model of a validated entry.
+    #[must_use]
+    pub fn into_model(self) -> Repo {
+        let skills = match self.skills {
+            Some(pins) => IndexSelection::Only(pins),
+            None => IndexSelection::All {
+                exclude: self.exclude,
             },
+        };
+        Repo::WellKnown {
+            origin: normalize_origin(&self.url).unwrap_or(self.url),
+            skills,
         }
     }
 }
@@ -444,51 +396,25 @@ fn check_source_keys_v1(repo: &RepoV1) -> Result<(), ValidationError> {
     check_revision_matches_repo(repo.repo.as_deref(), repo.revision.as_deref())
 }
 
-fn check_source_keys_v2(repo: &RepoV2) -> Result<(), ValidationError> {
-    check_one_kind(repo.repo.as_ref(), repo.well_known.as_ref())?;
-    let skills = repo.skills.as_deref().unwrap_or_default();
-    if repo.well_known.is_some() {
-        if repo.revision.is_some() {
-            return Err(well_known_revision());
-        }
-        if repo.exclude.is_some() && repo.skills.is_some() {
-            return Err(exclude_with_skills());
-        }
-        if skills.iter().any(|skill| {
-            skill.name.is_none()
-                || skill.path.is_some()
-                || skill.recurse.is_some()
-                || skill.exclude.is_some()
-        }) {
-            return Err(named_error(
-                "skills",
-                "a `well-known` source takes its skills by `name`, with an optional `digest`; `path`, `recurse` and `exclude` belong to a `repo`",
-            ));
-        }
-        return check_unique(skills.iter().filter_map(|skill| skill.name.as_ref()));
-    }
-    if repo.exclude.is_some() {
+fn check_sources_v2(v2: &V2) -> Result<(), ValidationError> {
+    if v2.repos.is_none() && v2.discovery.is_none() {
         return Err(named_error(
-            "exclude",
-            "a top-level `exclude` belongs to a `well-known` source; a `repo` filters under each of its `skills`",
+            "repos",
+            "at least one source is required, under `repos` or `discovery`",
         ));
     }
-    if skills.is_empty() {
-        return Err(named_error(
-            "skills",
-            "at least one skill is required: list where to look under `skills`, each with a `path`",
-        ));
+    Ok(())
+}
+
+fn check_repo_v2(repo: &RepoV2) -> Result<(), ValidationError> {
+    check_revision_matches_repo(Some(&repo.repo), repo.revision.as_deref())
+}
+
+fn check_discovery_v2(origin: &DiscoveryV2) -> Result<(), ValidationError> {
+    if origin.exclude.is_some() && origin.skills.is_some() {
+        return Err(exclude_with_skills());
     }
-    if skills
-        .iter()
-        .any(|skill| skill.path.is_none() || skill.name.is_some() || skill.digest.is_some())
-    {
-        return Err(named_error(
-            "skills",
-            "a `repo` selects its skills by `path`; `name` and `digest` belong to a `well-known` source",
-        ));
-    }
-    check_revision_matches_repo(repo.repo.as_deref(), repo.revision.as_deref())
+    check_unique(origin.skills.iter().flatten().map(|skill| &skill.name))
 }
 
 fn check_one_kind(
@@ -538,6 +464,15 @@ fn check_origin(origin: &str) -> Result<(), ValidationError> {
     normalize_origin(origin).map(|_| ()).ok_or_else(|| {
         named_error(
             "well-known",
+            "must be an origin, such as `https://skills.example.com`, with no path, query or credentials",
+        )
+    })
+}
+
+fn check_url(url: &str) -> Result<(), ValidationError> {
+    normalize_origin(url).map(|_| ()).ok_or_else(|| {
+        named_error(
+            "url",
             "must be an origin, such as `https://skills.example.com`, with no path, query or credentials",
         )
     })

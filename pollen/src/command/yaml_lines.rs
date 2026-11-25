@@ -14,10 +14,16 @@ static ITEM_START: LazyLock<Regex> =
 
 /// The `[start, end)` line ranges of the items under `repos:`.
 pub(crate) fn entries(lines: &[&str]) -> Vec<(usize, usize)> {
+    entries_of(lines, "repos:")
+}
+
+/// The `[start, end)` line ranges of the items of the top-level list `key`,
+/// written with its colon.
+pub(crate) fn entries_of(lines: &[&str], key: &str) -> Vec<(usize, usize)> {
     lines
         .iter()
-        .position(|line| line.trim_end().starts_with("repos:"))
-        .map_or_else(Vec::new, |repos| items(lines, repos, lines.len(), 0))
+        .position(|line| line.trim_end().starts_with(key))
+        .map_or_else(Vec::new, |header| items(lines, header, lines.len(), 0))
 }
 
 /// The `[start, end)` line ranges of the items of the block list whose key

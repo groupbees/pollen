@@ -1,6 +1,6 @@
 ---
 name: pollen
-description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml or its credentials.yaml, migrating a pollen.yaml to the newest format version (pollen config migrate), adding a well-known (LiteLLM, discovery index) source, seeing what skills a source provides before adding it (pollen show), adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning, skill refused for invisible characters).
+description: How to install, upgrade and use pollen to deploy and pin Agent Skills (pollen.yaml → .claude/skills and .agents/skills). Trigger when installing or upgrading pollen itself (macOS, Linux, WSL, Windows), creating or editing a pollen.yaml or its credentials.yaml, migrating a pollen.yaml to the newest format version (pollen config migrate), adding a discovery (well-known index, LiteLLM) source, seeing what skills a source provides before adding it (pollen show), adding a skills source to a project or to the user-level config, updating or pinning skill versions (pollen update, outdated, autoupdate --freeze, validate --pinned), or fixing a pollen error (directory pollen did not install, target managed by another config, branch revision warning, skill refused for invisible characters).
 ---
 
 # pollen
@@ -62,17 +62,19 @@ repos:
   - repo: local                              # paths next to this file
     skills:
       - path: .skills
-  - well-known: https://gateway.example.com  # serves /.well-known/agent-skills/index.json
+discovery:                                   # origins serving a discovery index
+  - url: https://gateway.example.com         # serves /.well-known/agent-skills/index.json
     skills:                                  # or `exclude: <regex>` to take the rest
       - name: pdf-summarizer
         digest: sha256:<64 hex>              # the pin; autoupdate --freeze writes it
 ```
 
 A `repo` lists where to look under `skills`, each with a `path`; a
-`well-known` origin (a LiteLLM gateway, a docs site) lists skills by `name`
+`discovery` origin (a LiteLLM gateway, a docs site) lists skills by `name`
 and takes no `revision`. A file without `version` is in version 1, where a
-`repo`'s list is called `paths`: keep editing it in its own version, or run
-`pollen config migrate` first. A `well-known` origin's token goes in
+`repo`'s list is called `paths` and an origin is a `- well-known: <origin>`
+entry of `repos`: keep editing it in its own version, or run
+`pollen config migrate` first. An origin's token goes in
 `~/.config/pollen/credentials.yaml`, never in `pollen.yaml`:
 
 ```yaml
@@ -97,7 +99,7 @@ sources. Before adding a source, `pollen show <repo>` lists its skills — the
   skills have no transitive dependencies, so a lockfile would only repeat it.
   Do not add one.
 - Write the tag, then let `pollen autoupdate --freeze` turn it into its commit.
-- A `well-known` skill is pinned by its `digest`. The index only serves the
+- A `discovery` skill is pinned by its `digest`. The index only serves the
   current artifact, so when the publisher replaces it a pinned run fails:
   `pollen outdated`, then `pollen autoupdate`.
 
@@ -125,6 +127,7 @@ pollen config migrate [--dry-run]   # rewrite pollen.yaml in the newest format v
 | `… is managed by another config, …` | Declare the source in that config; `--force` hands the directory over |
 | `` `main` is a branch `` (warning) | Pin a tag, then `pollen autoupdate --freeze` |
 | `` unknown field `paths` `` in a `version: 2` file | Version 2 calls it `skills`; rename the key |
+| `` … under `discovery`, each as `- url: <origin>` `` | A `version: 2` file lists origins under `discovery`, not as `well-known` in `repos`: move the entry, or `pollen config migrate` a version 1 file |
 | `` … or under `skills` with `version: 2` `` | A version 1 file uses `paths`; rename the key, or `pollen config migrate` |
 | `… this pollen reads versions 1 to N; upgrade pollen` | The file is newer than the installed pollen: upgrade it (see above) |
 | `two sources provide …` | Rename one skill, or `exclude` it in one source |

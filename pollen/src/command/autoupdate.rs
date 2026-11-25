@@ -11,7 +11,7 @@ use regex::Regex;
 use crate::cli::Options;
 use crate::command::Context;
 use crate::command::outdated::{self, DigestStatus, Entry, Status};
-use crate::command::yaml_lines::{entries, items, stage};
+use crate::command::yaml_lines::{entries, entries_of, items, stage};
 use crate::config::{IndexSelection, Repo, is_commit_id, normalize_origin};
 use crate::version::Version;
 
@@ -258,6 +258,9 @@ static REVISION_LINE: LazyLock<Regex> = LazyLock::new(|| {
 static WELL_KNOWN_LINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^\s*(?:-\s+)?well-known:\s*["']?([^"'#\s]+)["']?"#).expect("valid regex")
 });
+static URL_LINE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^\s*(?:-\s+)?url:\s*["']?([^"'#\s]+)["']?"#).expect("valid regex")
+});
 static SKILLS_LINE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*(?:-\s+)?)skills:\s*(?:#.*)?$").expect("valid regex"));
 static NAME_LINE: LazyLock<Regex> = LazyLock::new(|| {
@@ -335,10 +338,19 @@ pub fn rewrite_digests(text: &str, bumps: &[DigestBump]) -> Result<String> {
     let mut out: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
     let mut applied = vec![false; bumps.len()];
 
-    for (start, end) in entries(&lines) {
+    // A `well-known` entry of `repos` in version 1, a `discovery` one in
+    // version 2.
+    let origins = entries(&lines)
+        .into_iter()
+        .map(|range| (range, &*WELL_KNOWN_LINE))
+        .chain(
+            entries_of(&lines, "discovery:")
+                .into_iter()
+                .map(|range| (range, &*URL_LINE)),
+        );
+    for ((start, end), key) in origins {
         let origin = lines[start..end].iter().find_map(|line| {
-            WELL_KNOWN_LINE
-                .captures(line)
+            key.captures(line)
                 .and_then(|caps| normalize_origin(&caps[1]))
         });
         let Some(origin) = origin else { continue };
@@ -453,7 +465,7 @@ repos:
     #[test]
     fn bumps_a_revision_and_a_digest_in_a_version_two_file() {
         let text = format!(
-            "version: 2\nrepos:\n  - repo: https://x.example/a.git\n    revision: v0.1.0\n    skills:\n      - path: skills\n  - well-known: https://gateway.example.com\n    skills:\n      - name: pinned\n        digest: {OLD}\n"
+            "version: 2\nrepos:\n  - repo: https://x.example/a.git\n    revision: v0.1.0\n    skills:\n      - path: skills\ndiscovery:\n  - url: https://gateway.example.com\n    skills:\n      - name: pinned\n        digest: {OLD}\n"
         );
 
         let out = rewrite_digests(

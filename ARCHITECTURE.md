@@ -39,8 +39,9 @@ to a module under [pollen/src/](pollen/src/), except the last.
   rule about it, and keeps parsing apart from running.
   [config/raw](pollen/src/config/raw.rs) holds one set of serde types per
   format version, each with its schema and its validation in its own
-  vocabulary: an entry is a `repo` or a `well-known` origin, a git source
-  is pinned to a revision, `local` and `well-known` are not, a `path` never
+  vocabulary: a source is a `repo` or a discovery origin (`well-known` in
+  `repos` in version 1, an entry of `discovery` in version 2), a git source
+  is pinned to a revision, `local` and an origin are not, a `path` never
   climbs out of its source, an `exclude` compiles as a regular expression, a
   `digest` is a lowercase SHA-256. A validated file is converted, an older
   version through each newer one, into the model every command reads:

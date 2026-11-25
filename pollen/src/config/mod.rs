@@ -317,15 +317,16 @@ fn parse(text: &str, path: &Path) -> Result<Config> {
             path.display()
         );
     }
+    let targets = latest.targets.clone();
+    let clients = latest
+        .clients
+        .as_ref()
+        .map(|clients| Client::expand(clients.list()));
     Ok(Config {
         version,
-        targets: latest.targets,
-        clients: latest.clients.map(|clients| Client::expand(clients.list())),
-        repos: latest
-            .repos
-            .into_iter()
-            .map(raw::RepoV2::into_model)
-            .collect(),
+        targets,
+        clients,
+        repos: latest.into_sources(),
         base_dir: PathBuf::new(),
         file: PathBuf::new(),
     })
@@ -341,14 +342,15 @@ fn deserialize<T: DeserializeOwned>(text: &str, version: u32, path: &Path) -> Re
 }
 
 /// What a file that does not parse most likely meant, when it uses a key of
-/// version 2 in version 1, or when a `repo` entry uses the key the other
-/// version gives its paths. Read from the YAML itself, so it does not depend
-/// on how serde words its error.
+/// one version in the other: version 2's `clients` or `discovery` in
+/// version 1, a `repo`'s `paths` or a `well-known` entry in version 2, or a
+/// `repo`'s `skills` in version 1. Read from the YAML itself, so it does not
+/// depend on how serde words its error.
 fn version_hint(text: &str, version: u32) -> Option<&'static str> {
     let document: serde_norway::Value = serde_norway::from_str(text).ok()?;
-    if version == 1 && document.get("clients").is_some() {
+    if version == 1 && (document.get("clients").is_some() || document.get("discovery").is_some()) {
         return Some(
-            "`clients` needs `version: 2`: take it out, run `pollen config migrate`, then put it back",
+            "`clients` and `discovery` need `version: 2`: take them out, run `pollen config migrate`, then put them back",
         );
     }
     let repos = document.get("repos")?.as_sequence()?;
@@ -361,6 +363,9 @@ fn version_hint(text: &str, version: u32) -> Option<&'static str> {
         1 if uses("skills") => {
             Some("a `repo` lists where to look under `paths`, or under `skills` with `version: 2`")
         }
+        2 if repos.iter().any(|entry| entry.get("well-known").is_some()) => Some(
+            "version 2 lists the origins serving a discovery index under `discovery`, each as `- url: <origin>`",
+        ),
         2 if uses("paths") => Some("version 2 lists a `repo`'s paths under `skills`"),
         _ => None,
     }
@@ -947,8 +952,9 @@ mod tests {
     }
 
     #[test]
-    fn version_two_lists_paths_under_skills_and_reads_as_its_version_one_twin() {
-        let v2 = "version: 2\ntargets:\n  - skills-out\nrepos:\n  - repo: https://x.example/a.git\n    revision: v1.0.0\n    skills:\n      - path: skills\n        recurse: true\n        exclude: ^draft-\n  - repo: local\n    skills:\n      - path: mine\n  - well-known: https://x.example\n    skills:\n      - name: a\n";
+    fn version_two_lists_paths_under_skills_and_origins_under_discovery_and_reads_as_its_version_one_twin()
+     {
+        let v2 = "version: 2\ntargets:\n  - skills-out\nrepos:\n  - repo: https://x.example/a.git\n    revision: v1.0.0\n    skills:\n      - path: skills\n        recurse: true\n        exclude: ^draft-\n  - repo: local\n    skills:\n      - path: mine\ndiscovery:\n  - url: https://x.example\n    skills:\n      - name: a\n";
 
         let (v1, v2) = (parse(V1_FILE).unwrap(), parse(v2).unwrap());
 
@@ -962,11 +968,11 @@ mod tests {
         for (v1, v2) in [
             (
                 "repos:\n  - well-known: https://x.example\n    exclude: ^a\n",
-                "version: 2\nrepos:\n  - well-known: https://x.example\n    exclude: ^a\n",
+                "version: 2\ndiscovery:\n  - url: https://x.example\n    exclude: ^a\n",
             ),
             (
                 "repos:\n  - well-known: https://x.example\n",
-                "version: 2\nrepos:\n  - well-known: https://x.example\n",
+                "version: 2\ndiscovery:\n  - url: https://x.example/\n",
             ),
         ] {
             assert_eq!(parse(v1).unwrap().repos, parse(v2).unwrap().repos, "{v2}");
@@ -1005,6 +1011,17 @@ mod tests {
             format!("{skills_in_v1:#}").contains("`version: 2`"),
             "{skills_in_v1:#}"
         );
+        let well_known_in_v2 =
+            parse("version: 2\nrepos:\n  - well-known: https://x.example\n").unwrap_err();
+        let discovery_in_v1 = parse("discovery:\n  - url: https://x.example\n").unwrap_err();
+        assert!(
+            format!("{well_known_in_v2:#}").contains("under `discovery`"),
+            "{well_known_in_v2:#}"
+        );
+        assert!(
+            format!("{discovery_in_v1:#}").contains("`discovery` need `version: 2`"),
+            "{discovery_in_v1:#}"
+        );
 
         // A mistake unrelated to the version gets no hint.
         for yaml in [
@@ -1017,54 +1034,81 @@ mod tests {
     }
 
     #[test]
-    fn version_two_checks_the_skills_against_the_kind_of_source() {
+    fn version_two_checks_each_kind_of_source_in_its_own_list() {
         for (yaml, expected) in [
             (
-                "  - repo: local\n    skills:\n      - name: a\n",
-                "by `path`",
+                "repos:\n  - repo: local\n    skills:\n      - name: a\n",
+                "name",
+            ),
+            ("repos:\n  - repo: local\n", "skills"),
+            (
+                "repos:\n  - repo: local\n    skills: []\n",
+                "at least one skill",
             ),
             (
-                "  - repo: local\n    skills:\n      - path: .\n        digest: sha256:00\n",
-                "digest",
+                "repos:\n  - repo: local\n    exclude: ^a\n    skills:\n      - path: .\n",
+                "exclude",
             ),
             (
-                "  - well-known: https://x.example\n    skills:\n      - path: .\n",
-                "by `name`",
-            ),
-            (
-                "  - well-known: https://x.example\n    skills:\n      - name: a\n        recurse: true\n",
-                "by `name`",
-            ),
-            ("  - repo: local\n", "at least one skill"),
-            ("  - repo: local\n    skills: []\n", "at least one skill"),
-            (
-                "  - repo: local\n    exclude: ^a\n    skills:\n      - path: .\n",
-                "top-level `exclude`",
-            ),
-            (
-                "  - well-known: https://x.example\n    skills:\n      - name: a\n      - name: a\n",
-                "twice",
-            ),
-            (
-                "  - repo: https://x.example/a.git\n    skills:\n      - path: .\n",
+                "repos:\n  - repo: https://x.example/a.git\n    skills:\n      - path: .\n",
                 "revision",
             ),
             (
-                "  - repo: local\n    skills:\n      - path: ../out\n",
+                "repos:\n  - repo: local\n    revision: v1\n    skills:\n      - path: .\n",
+                "takes no revision",
+            ),
+            (
+                "repos:\n  - repo: local\n    skills:\n      - path: ../out\n",
                 "climb",
             ),
             (
-                "  - repo: local\n    skills:\n      - path: .\n        exclude: \"[\"\n",
+                "repos:\n  - repo: local\n    skills:\n      - path: .\n        exclude: \"[\"\n",
                 "regular expression",
             ),
             (
-                "  - repo: local\n    skills:\n      - path: .\n        surprise: true\n",
+                "repos:\n  - repo: local\n    skills:\n      - path: .\n        surprise: true\n",
                 "surprise",
             ),
+            ("repos: []\n", "at least one repo"),
+            (
+                "discovery:\n  - url: https://x.example\n    skills:\n      - path: .\n",
+                "path",
+            ),
+            (
+                "discovery:\n  - url: https://x.example\n    revision: v1\n",
+                "revision",
+            ),
+            (
+                "discovery:\n  - url: https://x.example\n    exclude: ^a\n    skills:\n      - name: b\n",
+                "does not combine",
+            ),
+            (
+                "discovery:\n  - url: https://x.example\n    skills:\n      - name: a\n      - name: a\n",
+                "twice",
+            ),
+            (
+                "discovery:\n  - url: https://x.example/skills\n",
+                "must be an origin",
+            ),
+            ("discovery: []\n", "at least one origin"),
+            ("targets: [out]\n", "at least one source"),
         ] {
-            let error = parse(&format!("version: 2\nrepos:\n{yaml}")).unwrap_err();
+            let error = parse(&format!("version: 2\n{yaml}")).unwrap_err();
             assert!(format!("{error:#}").contains(expected), "{yaml}: {error:#}");
         }
+    }
+
+    #[test]
+    fn version_two_reads_repos_then_discovery_origins() {
+        let config = parse("version: 2\ndiscovery:\n  - url: https://g.example\nrepos:\n  - repo: local\n    skills:\n      - path: .\n").unwrap();
+        let only_discovery = parse("version: 2\ndiscovery:\n  - url: https://g.example\n").unwrap();
+
+        assert!(matches!(config.repos[0], Repo::Local { .. }), "{config:?}");
+        assert!(
+            matches!(&config.repos[1], Repo::WellKnown { origin, .. } if origin == "https://g.example"),
+            "{config:?}"
+        );
+        assert_eq!(only_discovery.repos.len(), 1);
     }
 
     #[test]
@@ -1174,7 +1218,7 @@ mod tests {
                 .unwrap_err();
 
         assert!(
-            format!("{error:#}").contains("`clients` needs `version: 2`"),
+            format!("{error:#}").contains("`clients` and `discovery` need `version: 2`"),
             "{error:#}"
         );
     }

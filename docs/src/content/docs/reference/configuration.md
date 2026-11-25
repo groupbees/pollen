@@ -20,31 +20,33 @@ repos:
   - repo: local
     skills:
       - path: skills
-  - well-known: https://gateway.example.com
+discovery:
+  - url: https://gateway.example.com
     skills:
       - name: pdf-summarizer
         digest: sha256:3f2a9c0d5b8e7f41a6c2d9e0b1f3a4c5d6e7f8091a2b3c4d5e6f708192a3b4c5
 ```
 
-Each entry of `repos` is a `repo`, a git repository or the config's own
-directory, or a `well-known` origin. Each lists what it takes under `skills`:
-where to look, by `path`, on a `repo`; skills of the index, by `name`, on a
-`well-known` origin.
+A file takes its skills from two kinds of sources, each with a list of its
+own: `repos`, git repositories and the config's own directory, which list
+where to look under `skills`, by `path`; and `discovery`, origins serving a
+discovery index, which list the skills of the index under `skills`, by `name`.
+A file needs at least one of the two lists.
 
 | Key | Required | Default | Description |
 | --- | --- | --- | --- |
 | `version` | no | `1` | The [format version](#format-versions) the file is written in. This page describes version 2. |
 | `clients` | no | `all` | Version 2 only. The clients the skills are deployed for, as one value or a list: `all`, `claude` (`.claude/skills`) or `agent-skills` (`.agents/skills`, the directory every other Agent Skills client scans). The directories are in the working directory, or in the home directory with `--global`. Forbidden with `targets`. |
 | `targets` | no | — | Directories the skills are deployed into, instead of the `clients`' ones; each gets a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. Forbidden with `clients`. |
-| `repos[].repo` | unless `well-known` | — | A git URL, a path to a git repository, or `local` for the directory holding the config file. |
-| `repos[].revision` | for git | — | Tag, branch or commit to check out. A branch draws a warning, since each update deploys whatever it points to then; a full commit SHA is the only revision that cannot move (`pollen validate --pinned` enforces it). Forbidden on `local` and `well-known`. |
-| `repos[].skills[].path` | with `repo` | — | Directory to search, relative to the source root. Write it with `/`, which every platform reads. Forbidden on `well-known`. |
-| `repos[].skills[].recurse` | no | `false` | With `repo`: search the whole subtree instead of the immediate children. |
-| `repos[].skills[].exclude` | no | — | With `repo`: regular expression rejecting skills whose path under `path` matches. |
-| `repos[].well-known` | unless `repo` | — | An origin, `https://host[:port]` with no path, serving an [Agent Skills discovery index](/guides/well-known-sources/). |
-| `repos[].exclude` | no | — | With `well-known`: regular expression rejecting the skills of the index whose name matches. Forbidden with `skills`. |
-| `repos[].skills[].name` | with `well-known` | — | A skill to take from the index; without a `skills` list, every skill is taken. Forbidden on `repo`. |
-| `repos[].skills[].digest` | no | — | With `well-known`: the `sha256:<64 hex digits>` of the artifact to deploy. The run fails when the index publishes another one (`pollen validate --pinned` requires it). |
+| `repos[].repo` | yes | — | A git URL, a path to a git repository, or `local` for the directory holding the config file. |
+| `repos[].revision` | for git | — | Tag, branch or commit to check out. A branch draws a warning, since each update deploys whatever it points to then; a full commit SHA is the only revision that cannot move (`pollen validate --pinned` enforces it). Forbidden on `local`. |
+| `repos[].skills[].path` | yes | — | Directory to search, relative to the source root. Write it with `/`, which every platform reads. |
+| `repos[].skills[].recurse` | no | `false` | Search the whole subtree instead of the immediate children. |
+| `repos[].skills[].exclude` | no | — | Regular expression rejecting skills whose path under `path` matches. |
+| `discovery[].url` | yes | — | An origin, `https://host[:port]` with no path, serving an [Agent Skills discovery index](/guides/well-known-sources/). |
+| `discovery[].exclude` | no | — | Regular expression rejecting the skills of the index whose name matches. Forbidden with `skills`. |
+| `discovery[].skills[].name` | yes | — | A skill to take from the index; without a `skills` list, every skill is taken. |
+| `discovery[].skills[].digest` | no | — | The `sha256:<64 hex digits>` of the artifact to deploy. The run fails when the index publishes another one (`pollen validate --pinned` requires it). |
 
 A `path` that itself holds a `SKILL.md` is taken as one skill. Otherwise its
 subdirectories are searched, and a skill found on the way is never descended
@@ -100,7 +102,7 @@ removed, or changes meaning; a new optional key does not move it.
 | Version | Read by | Change |
 | --- | --- | --- |
 | 1 | every release | The original format: a `repo` lists where to look under `paths`. |
-| 2 | pollen 0.8 and later | A `repo` lists where to look under `skills`, as a `well-known` source lists its skills. `clients` picks the clients to deploy for. |
+| 2 | pollen 0.8 and later | A `repo` lists where to look under `skills`. The origins serving a discovery index move out of `repos` to a list of their own, `discovery`, each naming its origin under `url`. `clients` picks the clients to deploy for. |
 
 `pollen config migrate` rewrites a file in the newest version, in place:
 comments and layout are kept, and the file is written only if it declares the
@@ -111,14 +113,17 @@ $ pollen config migrate
 pollen.yaml: migrated from version 1 to version 2
 ```
 
-A version 1 file is the same file with `paths` in place of each `repo`
-entry's `skills`, and no `version`:
+A version 1 file has no `version`, `paths` in place of each `repo` entry's
+`skills`, and its discovery origins in `repos`, each under `well-known`:
 
 ```yaml
 repos:
   - repo: local
     paths:
       - path: skills
+  - well-known: https://gateway.example.com
+    skills:
+      - name: pdf-summarizer
 ```
 
 The schema validates a file against the version it declares, so an editor
