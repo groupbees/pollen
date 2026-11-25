@@ -8,7 +8,7 @@ use anyhow::{Context as _, Result, bail, ensure};
 use regex::Regex;
 
 use crate::cli::Options;
-use crate::command::yaml_lines::{entries, write_checked};
+use crate::command::yaml_lines::{entries, stage};
 use crate::config::{self, Config, LATEST};
 
 /// What a migration changed, or would change.
@@ -71,14 +71,15 @@ pub fn apply(options: &Options, dry_run: bool) -> Result<Migration> {
     }
 
     let migrated = to_v2(&text)?;
-    write_checked(&path, &migrated, dry_run, |config| {
-        ensure!(
-            config.repos == original.repos && config.targets == original.targets,
-            "the migrated config would declare other sources than {}; nothing was written",
-            path.display()
-        );
-        Ok(())
-    })?;
+    let staged = stage(&path, &migrated)?;
+    ensure!(
+        staged.config.repos == original.repos && staged.config.targets == original.targets,
+        "the migrated config would declare other sources than {}; nothing was written",
+        path.display()
+    );
+    if !dry_run {
+        staged.persist(&path)?;
+    }
     Ok(Migration {
         path,
         from_version,

@@ -11,7 +11,7 @@ use regex::Regex;
 use crate::cli::Options;
 use crate::command::Context;
 use crate::command::outdated::{self, DigestStatus, Entry, Status};
-use crate::command::yaml_lines::{entries, items, write_checked};
+use crate::command::yaml_lines::{entries, items, stage};
 use crate::config::{IndexSelection, Repo, is_commit_id, normalize_origin};
 use crate::version::Version;
 
@@ -162,7 +162,7 @@ pub async fn apply(
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("cannot read {}", path.display()))?;
         let text = rewrite_digests(&rewrite(&text, &bumps)?, &digests)?;
-        write_checked(&path, &text, false, |_| Ok(()))?;
+        stage(&path, &text)?.persist(&path)?;
     }
     Ok(Outcome {
         path,

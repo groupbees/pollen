@@ -57,34 +57,47 @@ pub(crate) fn items(
         .collect()
 }
 
-/// Check that `text` loads as a valid config that `accept` approves, then,
-/// unless `dry_run`, write it to `path` in one rename.
-///
-/// The check reads a staged copy beside `path`, so a relative `local` path
+/// A rewritten config, written beside the file it replaces and loaded, but
+/// not in place yet.
+pub(crate) struct Staged {
+    file: tempfile::NamedTempFile,
+    /// The rewritten file, as pollen reads it.
+    pub(crate) config: Config,
+}
+
+/// Write `text` beside `path` and load it, so a relative `local` path
 /// resolves as it will once the file is in place.
-pub(crate) fn write_checked(
-    path: &Path,
-    text: &str,
-    dry_run: bool,
-    accept: impl FnOnce(&Config) -> Result<()>,
-) -> Result<()> {
+///
+/// # Errors
+///
+/// When the copy cannot be written or is not a valid config.
+pub(crate) fn stage(path: &Path, text: &str) -> Result<Staged> {
     let directory = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let staging = tempfile::Builder::new()
+    let file = tempfile::Builder::new()
         .prefix(".pollen-config-")
         .suffix(".yaml")
         .tempfile_in(directory)
         .with_context(|| format!("cannot write into {}", directory.display()))?;
-    std::fs::write(staging.path(), text)?;
-    let config = Config::load(staging.path())
+    std::fs::write(file.path(), text)?;
+    let config = Config::load(file.path())
         .context("the rewritten config is invalid; nothing was written")?;
-    accept(&config)?;
-    if !dry_run {
-        staging
+    Ok(Staged { file, config })
+}
+
+impl Staged {
+    /// Move the rewritten file over `path`, in one rename. Dropping a
+    /// `Staged` instead deletes the copy and leaves `path` alone.
+    ///
+    /// # Errors
+    ///
+    /// When the rename fails.
+    pub(crate) fn persist(self, path: &Path) -> Result<()> {
+        self.file
             .persist(path)
             .with_context(|| format!("cannot write {}", path.display()))?;
+        Ok(())
     }
-    Ok(())
 }

@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use regex::Regex;
+use serde::de::DeserializeOwned;
 use validator::Validate;
 
 pub use raw::{LATEST, PathSpec, SkillPin};
@@ -189,31 +190,12 @@ type Parsed = (u32, Vec<Repo>, Option<Vec<PathBuf>>);
 /// through each newer version, into the model.
 fn parse(text: &str, path: &Path) -> Result<Parsed> {
     let version = version_of(text).with_context(|| format!("{} is invalid", path.display()))?;
-    let invalid = || format!("{} is not a valid pollen config", path.display());
     let latest = if version == 1 {
-        let v1: raw::V1 = serde_norway::from_str(text)
-            .map_err(|error| {
-                if error.to_string().contains("unknown field `path`, expected `name`") {
-                    anyhow!(
-                        "{error}; a `repo` lists where to look under `paths`, or under `skills` with `version: 2`"
-                    )
-                } else {
-                    anyhow::Error::new(error)
-                }
-            })
-            .with_context(invalid)?;
+        let v1: raw::V1 = deserialize(text, version, path)?;
         check(&v1, path)?;
         raw::V2::from(v1)
     } else {
-        let v2: raw::V2 = serde_norway::from_str(text)
-            .map_err(|error| {
-                if error.to_string().contains("unknown field `paths`") {
-                    anyhow!("{error}; version 2 lists a source's paths under `skills`")
-                } else {
-                    anyhow::Error::new(error)
-                }
-            })
-            .with_context(invalid)?;
+        let v2: raw::V2 = deserialize(text, version, path)?;
         check(&v2, path)?;
         v2
     };
@@ -223,6 +205,35 @@ fn parse(text: &str, path: &Path) -> Result<Parsed> {
         .map(raw::RepoV2::into_model)
         .collect();
     Ok((version, repos, latest.targets))
+}
+
+fn deserialize<T: DeserializeOwned>(text: &str, version: u32, path: &Path) -> Result<T> {
+    serde_norway::from_str(text)
+        .map_err(|error| match version_hint(text, version) {
+            Some(hint) => anyhow!("{error}; {hint}"),
+            None => anyhow::Error::new(error),
+        })
+        .with_context(|| format!("{} is not a valid pollen config", path.display()))
+}
+
+/// What a file that does not parse most likely meant, when a `repo` entry
+/// uses the key the other version gives its paths. Read from the YAML
+/// itself, so it does not depend on how serde words its error.
+fn version_hint(text: &str, version: u32) -> Option<&'static str> {
+    let document: serde_norway::Value = serde_norway::from_str(text).ok()?;
+    let repos = document.get("repos")?.as_sequence()?;
+    let uses = |key: &str| {
+        repos
+            .iter()
+            .any(|entry| entry.get("repo").is_some() && entry.get(key).is_some())
+    };
+    match version {
+        1 if uses("skills") => {
+            Some("a `repo` lists where to look under `paths`, or under `skills` with `version: 2`")
+        }
+        2 if uses("paths") => Some("version 2 lists a `repo`'s paths under `skills`"),
+        _ => None,
+    }
 }
 
 fn check(raw: &impl Validate, path: &Path) -> Result<()> {
@@ -864,6 +875,15 @@ mod tests {
             format!("{skills_in_v1:#}").contains("`version: 2`"),
             "{skills_in_v1:#}"
         );
+
+        // A mistake unrelated to the version gets no hint.
+        for yaml in [
+            "version: 2\nrepos:\n  - repo: local\n    skills:\n      - path: .\n        recurze: true\n",
+            "repos:\n  - well-known: https://x.example\n    skills:\n      - name: a\n        surprise: true\n",
+        ] {
+            let error = format!("{:#}", parse(yaml).unwrap_err());
+            assert!(!error.contains("version"), "{yaml}: {error}");
+        }
     }
 
     #[test]
