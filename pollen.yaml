@@ -1,6 +1,11 @@
+# yaml-language-server: $schema=./schema/pollen.schema.json
+#
+# Skills for agents working on pollen. Run `pollen update` to deploy them
+# into .claude/skills and .agents/skills (both gitignored).
 repos:
-  - repo: https://github.com/leroyguillaume/claude
-    revision: HEAD
+  - repo: https://github.com/leroyguillaume/skills
+    revision: 2ec9b6ee210a2d34f239e4a60797a30fa699d02a  # main, 2026-11-24 (no release tag yet)
     paths:
-      - path: skills/
-        recurse: true
+      - path: rust-build-conventions
+      - path: rust-conventions
+      - path: rust-http-conventions
