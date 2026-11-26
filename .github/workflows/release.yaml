@@ -71,10 +71,11 @@ jobs:
             --target all --format json --spec-version 1.6
           mv pollen/pollen_bin.cdx.json "$SBOM"
 
+      # Not named pollen-*, so the publish job never collects it with the archives.
       - name: keep the SBOM for the release job
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: pollen-sbom
+          name: sbom
           path: ${{ env.SBOM }}
           if-no-files-found: error
 
@@ -212,6 +213,7 @@ jobs:
       attestations: write
     env:
       SBOM: pollen-v${{ needs.version.outputs.version }}.cdx.json
+      BUNDLE: pollen-v${{ needs.version.outputs.version }}.sigstore.json
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -233,18 +235,28 @@ jobs:
           pattern: pollen-*
           merge-multiple: true
 
+      - name: collect the SBOM
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: sbom
+
       - name: write the checksums
         working-directory: artifacts
         run: sha256sum -- *.tar.gz *.zip > SHA256SUMS
 
       - name: attest the provenance of the release files
+        id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
         with:
           subject-path: |
             artifacts/*.tar.gz
             artifacts/*.zip
             artifacts/SHA256SUMS
-            artifacts/${{ env.SBOM }}
+
+      - name: name the attestation bundle after the release
+        env:
+          ATTESTATION: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$ATTESTATION" "$BUNDLE"
 
       - name: attest the SBOM of the archives
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
@@ -252,7 +264,7 @@ jobs:
           subject-path: |
             artifacts/*.tar.gz
             artifacts/*.zip
-          sbom-path: artifacts/${{ env.SBOM }}
+          sbom-path: ${{ env.SBOM }}
 
       - name: create the GitHub release
         env:
@@ -260,7 +272,7 @@ jobs:
           PREVIOUS: ${{ steps.previous.outputs.tag }}
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes \
-            ${PREVIOUS:+--notes-start-tag "$PREVIOUS"} artifacts/*
+            ${PREVIOUS:+--notes-start-tag "$PREVIOUS"} artifacts/* "$SBOM" "$BUNDLE"
 
   homebrew:
     name: homebrew

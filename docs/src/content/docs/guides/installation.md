@@ -44,7 +44,7 @@ Get-FileHash -Algorithm SHA256 pollen-x86_64-pc-windows-msvc-v*.zip
 
 ### Verify the provenance
 
-Each archive, `SHA256SUMS` and the SBOM carry a signed
+Each archive and `SHA256SUMS` carry a signed
 [build provenance attestation](https://docs.github.com/en/actions/concepts/security/artifact-attestations):
 proof that this repository's release workflow built them from the tagged
 commit. Check one with the [GitHub CLI](https://cli.github.com):
@@ -52,6 +52,18 @@ commit. Check one with the [GitHub CLI](https://cli.github.com):
 ```sh
 gh attestation verify pollen-aarch64-apple-darwin-v*.tar.gz --repo groupbees/pollen
 ```
+
+The same attestation is attached to the release as a Sigstore bundle,
+`pollen-v<version>.sigstore.json`, to check a file without querying GitHub's
+attestation API:
+
+```sh
+gh attestation verify pollen-aarch64-apple-darwin-v*.tar.gz \
+  --bundle pollen-v<version>.sigstore.json --repo groupbees/pollen
+```
+
+With `--bundle`, `--repo` is only compared with the repository name recorded
+at signing time, so prefer the first form when you can reach GitHub.
 
 The release also ships a CycloneDX SBOM, `pollen-v<version>.cdx.json`, listing
 the crates compiled into the binary on every platform. It is attested against
