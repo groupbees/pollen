@@ -15,8 +15,8 @@ describes, never in a public issue or pull request.
 [mise](https://mise.jdx.dev) installs every tool at the version
 [mise.toml](mise.toml) pins: the Rust toolchain with `rustfmt` and `clippy`,
 Python, uv, Node.js for the documentation site, Task, pre-commit, Trivy,
-`cargo-llvm-cov` for the coverage, and `cargo-edit` for cutting a release. [mise.lock](mise.lock) holds their
-checksums.
+`cargo-llvm-cov` for the coverage, and `cargo-edit` for cutting a release.
+[mise.lock](mise.lock) holds their checksums.
 
 Install mise and hook it into your shell, as its
 [installation guide](https://mise.jdx.dev/installing-mise.html) describes
@@ -228,10 +228,9 @@ commit gate stays fast.
 
 `quality` and `security` are the checks that block a merge. `coverage` is
 informational, in a workflow of its own because every job of those two is
-required. `docs` is
-path-filtered on `docs/` outside `docs/adr/`, `assets/`, the mise and Task
-files and its own workflow, so it is never a required check. For the Windows
-code paths without a Windows host, `task lint:windows` runs clippy on them.
+required. `docs` is path-filtered on `docs/` outside `docs/adr/`, `assets/`,
+the mise and Task files and its own workflow, so it is never a required check.
+For the Windows code paths without a Windows host, `task lint:windows` runs clippy on them.
 
 The pipeline needs these secrets and variables:
 
