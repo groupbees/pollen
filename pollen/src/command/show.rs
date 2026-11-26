@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use serde::Serialize;
 
+use crate::agent::{self, Details};
 use crate::cli::{Format, Options};
-use crate::config::PathSpec;
+use crate::config::{AgentSelection, Client, Destination, PathSpec};
 use crate::source::{git, relative_slug};
 use crate::version::{self, RemoteTag};
 use crate::{discovery, skill};
@@ -27,6 +28,39 @@ pub struct Listing {
     pub commit: String,
     /// Every skill directory found, ordered by path.
     pub skills: Vec<Entry>,
+    /// Every agent file found under the directories asked for, in the order
+    /// they were asked for, then by path.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<AgentEntry>,
+}
+
+/// A directory of agent files to list, and the client whose rules they are
+/// checked against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentDirectory {
+    pub path: PathBuf,
+    pub client: Client,
+}
+
+/// One agent file found in the source.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AgentEntry {
+    /// Its path inside the source.
+    pub path: String,
+    /// The client whose rules it was checked against.
+    pub client: Client,
+    /// The name of a valid agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The `description` of a valid agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// What a valid agent's frontmatter grants.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Details>,
+    /// Why the agent is invalid for its client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// One skill directory found in the source.
@@ -54,9 +88,18 @@ pub async fn run(
     repo: &str,
     revision: Option<&str>,
     path: Option<&Path>,
+    agents: &[AgentDirectory],
     format: Format,
 ) -> Result<()> {
-    let listing = inspect(repo, revision, path, &options.cache_dir(), options.offline).await?;
+    let listing = inspect(
+        repo,
+        revision,
+        path,
+        agents,
+        &options.cache_dir(),
+        options.offline,
+    )
+    .await?;
     match format {
         Format::Text => print!("{}", render(&listing)),
         Format::Json => println!("{}", serde_json::to_string_pretty(&listing)?),
@@ -65,19 +108,21 @@ pub async fn run(
 }
 
 /// Check `repo` out at `revision` — its newest release when `None` — and list
-/// the skills under `path`, the whole source when `None`.
+/// the skills under `path`, the whole source when `None`, and the agent
+/// files directly under each directory of `agents`, for its client.
 ///
-/// A skill that breaks the specification is listed with its error rather than
+/// A skill or an agent that is invalid is listed with its error rather than
 /// failing the run: `show` is how a catalog in progress gets inspected too.
 ///
 /// # Errors
 ///
 /// When the source cannot be fetched, the revision names nothing, or `path`
-/// is missing from the source.
+/// or a directory of `agents` is missing from the source.
 pub async fn inspect(
     repo: &str,
     revision: Option<&str>,
     path: Option<&Path>,
+    agents: &[AgentDirectory],
     cache_dir: &Path,
     offline: bool,
 ) -> Result<Listing> {
@@ -119,12 +164,45 @@ pub async fn inspect(
         })
         .collect();
 
+    let mut listed = Vec::new();
+    for directory in agents {
+        let selection = AgentSelection {
+            path: directory.path.clone(),
+            exclude: None,
+            destination: Destination::Clients(vec![directory.client]),
+        };
+        for file in discovery::agent_files(&root, &selection)? {
+            let path = relative_slug(&root, &file);
+            let checked = agent::load(&file, false)
+                .and_then(|found| found.check(directory.client).map(|()| found));
+            listed.push(match checked {
+                Ok(found) => AgentEntry {
+                    path,
+                    client: directory.client,
+                    name: Some(found.name),
+                    description: found.description,
+                    details: Some(found.details),
+                    error: None,
+                },
+                Err(error) => AgentEntry {
+                    path,
+                    client: directory.client,
+                    name: None,
+                    description: None,
+                    details: None,
+                    error: Some(error.problem),
+                },
+            });
+        }
+    }
+
     Ok(Listing {
         repo: repo.to_owned(),
         revision,
         release,
         commit: checkout.resolved.unwrap_or_default(),
         skills,
+        agents: listed,
     })
 }
 
@@ -147,7 +225,8 @@ fn pick_revision(
     ))
 }
 
-/// The text listing: a header, one line per skill, and the line to pin it.
+/// The text listing: a header, one line per skill, one per agent followed by
+/// what its frontmatter grants, and the line to pin it.
 #[must_use]
 pub fn render(listing: &Listing) -> String {
     let short = listing.commit.get(..8).unwrap_or(&listing.commit);
@@ -158,6 +237,12 @@ pub fn render(listing: &Listing) -> String {
         .skills
         .iter()
         .map(|entry| entry.path.chars().count())
+        .chain(
+            listing
+                .agents
+                .iter()
+                .map(|entry| entry.path.chars().count()),
+        )
         .max()
         .unwrap_or(0);
     for entry in &listing.skills {
@@ -167,6 +252,23 @@ pub fn render(listing: &Listing) -> String {
             (None, None) => String::new(),
         };
         let _ = writeln!(out, "  {:width$}  {detail}", entry.path);
+    }
+    for entry in &listing.agents {
+        let client = entry.client;
+        let detail = match (&entry.description, &entry.error) {
+            (_, Some(error)) => format!("invalid agent: {error}"),
+            (Some(description), None) => {
+                format!(
+                    "{client} agent: {}",
+                    truncate(description, DESCRIPTION_WIDTH)
+                )
+            }
+            (None, None) => format!("{client} agent"),
+        };
+        let _ = writeln!(out, "  {:width$}  {detail}", entry.path);
+        if let Some(details) = entry.details.as_ref().filter(|details| !details.is_empty()) {
+            let _ = writeln!(out, "  {:width$}  {details}", "");
+        }
     }
 
     let invalid = listing
@@ -178,6 +280,17 @@ pub fn render(listing: &Listing) -> String {
     let _ = write!(out, "{valid} skill(s)");
     if invalid > 0 {
         let _ = write!(out, ", {invalid} invalid");
+    }
+    if !listing.agents.is_empty() {
+        let invalid = listing
+            .agents
+            .iter()
+            .filter(|entry| entry.error.is_some())
+            .count();
+        let _ = write!(out, "; {} agent(s)", listing.agents.len() - invalid);
+        if invalid > 0 {
+            let _ = write!(out, ", {invalid} invalid");
+        }
     }
     let _ = writeln!(out);
 
@@ -311,7 +424,7 @@ mod tests {
         let origin = catalog();
         let cache = tempfile::tempdir().unwrap();
 
-        let listing = inspect(&url(&origin), None, None, cache.path(), false)
+        let listing = inspect(&url(&origin), None, None, &[], cache.path(), false)
             .await
             .unwrap();
 
@@ -340,9 +453,16 @@ mod tests {
         let origin = catalog();
         let cache = tempfile::tempdir().unwrap();
 
-        let listing = inspect(&url(&origin), Some("v1.0.0"), None, cache.path(), false)
-            .await
-            .unwrap();
+        let listing = inspect(
+            &url(&origin),
+            Some("v1.0.0"),
+            None,
+            &[],
+            cache.path(),
+            false,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(listing.revision, "v1.0.0");
         assert_eq!(listing.release.as_deref(), Some("v1.0.0"));
@@ -358,6 +478,7 @@ mod tests {
             &url(&origin),
             None,
             Some(Path::new("skills/docker")),
+            &[],
             cache.path(),
             false,
         )
@@ -375,7 +496,7 @@ mod tests {
         commit(origin.path(), "first");
         let cache = tempfile::tempdir().unwrap();
 
-        let listing = inspect(&url(&origin), None, None, cache.path(), false)
+        let listing = inspect(&url(&origin), None, None, &[], cache.path(), false)
             .await
             .unwrap();
 
@@ -388,7 +509,15 @@ mod tests {
     async fn offline_needs_an_explicit_revision() {
         let cache = tempfile::tempdir().unwrap();
 
-        let result = inspect("https://example.invalid/x", None, None, cache.path(), true).await;
+        let result = inspect(
+            "https://example.invalid/x",
+            None,
+            None,
+            &[],
+            cache.path(),
+            true,
+        )
+        .await;
 
         assert!(result.is_err());
     }
@@ -400,6 +529,7 @@ mod tests {
             release: Some("v1.1.0".to_owned()),
             commit: "5984faabb700c59271614f35fe5f2e29939ef89f".to_owned(),
             skills,
+            agents: Vec::new(),
         }
     }
 
@@ -434,6 +564,131 @@ mod tests {
              2 skill(s), 1 invalid\n\
              pin with: revision: 5984faabb700c59271614f35fe5f2e29939ef89f  # v1.1.0\n"
         );
+    }
+
+    #[tokio::test]
+    async fn lists_the_agents_of_each_directory_asked_for() {
+        let origin = catalog();
+        write(
+            origin.path(),
+            "agents/claude/reviewer.md",
+            "---\nname: reviewer\ndescription: Reviews code.\ntools: Read\n---\n",
+        );
+        write(origin.path(), "agents/claude/README.md", "# Agents\n");
+        write(
+            origin.path(),
+            "agents/opencode/docs.md",
+            "---\ndescription: Writes docs.\n---\n",
+        );
+        commit(origin.path(), "agents");
+        let cache = tempfile::tempdir().unwrap();
+        let specs = [
+            AgentDirectory {
+                path: PathBuf::from("agents/claude"),
+                client: Client::ClaudeCode,
+            },
+            AgentDirectory {
+                path: PathBuf::from("agents/opencode"),
+                client: Client::OpenCode,
+            },
+        ];
+
+        let listing = inspect(
+            &url(&origin),
+            Some("main"),
+            None,
+            &specs,
+            cache.path(),
+            false,
+        )
+        .await
+        .unwrap();
+
+        let agents: Vec<_> = listing
+            .agents
+            .iter()
+            .map(|entry| (entry.path.as_str(), entry.client, entry.name.as_deref()))
+            .collect();
+        assert_eq!(
+            agents,
+            [
+                ("agents/claude/README.md", Client::ClaudeCode, None),
+                (
+                    "agents/claude/reviewer.md",
+                    Client::ClaudeCode,
+                    Some("reviewer")
+                ),
+                ("agents/opencode/docs.md", Client::OpenCode, Some("docs")),
+            ]
+        );
+        assert!(
+            listing.agents[0]
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("not a valid agent name")
+        );
+        assert_eq!(
+            listing.agents[1].details.as_ref().unwrap().tools.as_deref(),
+            Some("Read")
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_an_agent_directory_missing_from_the_source() {
+        let origin = catalog();
+        let cache = tempfile::tempdir().unwrap();
+        let spec = AgentDirectory {
+            path: PathBuf::from("agents"),
+            client: Client::OpenCode,
+        };
+
+        let result = inspect(&url(&origin), None, None, &[spec], cache.path(), false).await;
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn renders_each_agent_with_what_it_grants() {
+        let mut listing = listing(vec![valid("skills/a", "First.")]);
+        listing.agents = vec![
+            AgentEntry {
+                path: "agents/reviewer.md".to_owned(),
+                client: Client::ClaudeCode,
+                name: Some("reviewer".to_owned()),
+                description: Some("Reviews code.".to_owned()),
+                details: Some(Details {
+                    tools: Some("Read, Grep".to_owned()),
+                    model: Some("opus".to_owned()),
+                    permission: Some("plan".to_owned()),
+                    hooks: true,
+                    mcp_servers: false,
+                }),
+                error: None,
+            },
+            AgentEntry {
+                path: "agents/README.md".to_owned(),
+                client: Client::ClaudeCode,
+                name: None,
+                description: None,
+                details: None,
+                error: Some("has no YAML frontmatter".to_owned()),
+            },
+        ];
+
+        assert_eq!(
+            render(&listing),
+            "https://example.invalid/skills @ v1.1.0 (5984faab)\n\
+             \x20 skills/a            First.\n\
+             \x20 agents/reviewer.md  claude-code agent: Reviews code.\n\
+             \x20                     tools: Read, Grep; model: opus; permission: plan; hooks\n\
+             \x20 agents/README.md    invalid agent: has no YAML frontmatter\n\
+             1 skill(s); 1 agent(s), 1 invalid\n\
+             pin with: revision: 5984faabb700c59271614f35fe5f2e29939ef89f  # v1.1.0\n"
+        );
+        let json = serde_json::to_value(&listing).unwrap();
+        assert_eq!(json["agents"][0]["client"], "claude-code");
+        assert_eq!(json["agents"][0]["details"]["hooks"], true);
     }
 
     #[test]

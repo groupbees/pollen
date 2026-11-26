@@ -8,6 +8,7 @@ use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use tracing_subscriber::EnvFilter;
 
+use crate::command::show::AgentDirectory;
 use crate::config::{Client, ClientChoice};
 use crate::{command, shutdown};
 
@@ -68,13 +69,16 @@ pub struct Options {
     )]
     pub config: PathBuf,
 
-    /// Use the user-level config and deploy into the user's skill directories.
+    /// Use the user-level config and deploy into the user's skill and agent
+    /// directories.
     ///
     /// Reads `$XDG_CONFIG_HOME/pollen/pollen.yaml` (`~/.config/pollen/pollen.yaml`
     /// when unset, `%APPDATA%\pollen\pollen.yaml` on Windows); the skill
     /// directories of its clients are under the home directory, so an entry
     /// naming no `targets` deploys into `~/.claude/skills` and
-    /// `~/.agents/skills` by default.
+    /// `~/.agents/skills` by default. Agents go to `~/.claude/agents` and
+    /// `$XDG_CONFIG_HOME/opencode/agents` (`~/.config/opencode/agents` when
+    /// unset or empty, on every platform).
     #[arg(
         long,
         short = 'g',
@@ -84,9 +88,10 @@ pub struct Options {
     )]
     pub global: bool,
 
-    /// Directory to deploy into, instead of the destination of every entry.
+    /// Directory to deploy skills into, instead of the destination of every
+    /// entry.
     ///
-    /// The run visits no other directory. Repeat the flag for several
+    /// The run deploys no agent and visits no other directory. Repeat the flag for several
     /// directories. The environment variable
     /// takes a list separated like `PATH`: `;` on Windows, `:` elsewhere.
     #[arg(
@@ -97,7 +102,8 @@ pub struct Options {
     )]
     pub targets: Vec<PathBuf>,
 
-    /// Client to deploy for: only what the config sends to it.
+    /// Client to deploy skills and agents for: only what the config sends
+    /// to it.
     ///
     /// An entry sent to other clients or to `targets` deploys nothing in
     /// that run, and the run visits no other directory. Repeat the flag for
@@ -153,8 +159,12 @@ impl ValueEnum for ClientChoice {
 
     fn to_possible_value(&self) -> Option<PossibleValue> {
         let help = match self {
-            Self::ClaudeCode => "Claude Code, skills into `.claude/skills`",
-            Self::OpenCode => "OpenCode, skills into `.agents/skills`",
+            Self::ClaudeCode => {
+                "Claude Code, skills into `.claude/skills`, agents into `.claude/agents`"
+            }
+            Self::OpenCode => {
+                "OpenCode, skills into `.agents/skills`, agents into `.opencode/agents`"
+            }
             Self::All => "Every client",
         };
         Some(PossibleValue::new(self.name()).help(help))
@@ -206,7 +216,7 @@ impl Options {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Install, refresh and prune the declared skills.
+    /// Install, refresh and prune the declared skills and agents.
     Update {
         /// Report what would change without touching the target directory.
         #[arg(long, env = "POLLEN_DRY_RUN")]
@@ -216,8 +226,8 @@ pub enum Command {
         #[arg(long, env = "POLLEN_FORCE")]
         force: bool,
 
-        /// Deploy skills whose files hold invisible characters, with a warning
-        /// for each, instead of refusing them.
+        /// Deploy skills and agents whose files hold invisible characters, with
+        /// a warning for each, instead of refusing them.
         ///
         /// Zero-width and bidirectional controls, tag characters and stray
         /// variation selectors are what hidden prompt injections are made of:
@@ -226,10 +236,11 @@ pub enum Command {
         allow_hidden_characters: bool,
     },
 
-    /// Show the skills pollen manages in the target directory.
+    /// Show the skills and agents pollen manages in each directory it visits.
     List,
 
-    /// Check the config and every skill it selects, without deploying.
+    /// Check the config and every skill and agent it selects, without
+    /// deploying.
     Validate {
         /// Config files to check, instead of the one `--config` names.
         #[arg(value_name = "CONFIG")]
@@ -252,8 +263,8 @@ pub enum Command {
         #[arg(long, env = "POLLEN_PINNED")]
         pinned: bool,
 
-        /// Accept skills whose files hold invisible characters, with a warning
-        /// for each, instead of reporting them as invalid.
+        /// Accept skills and agents whose files hold invisible characters, with
+        /// a warning for each, instead of reporting them as invalid.
         #[arg(long, env = "POLLEN_ALLOW_HIDDEN_CHARACTERS")]
         allow_hidden_characters: bool,
     },
@@ -316,10 +327,12 @@ pub enum Command {
         command: ConfigCommand,
     },
 
-    /// List the skills a git source provides, before adding it to a config.
+    /// List the skills, and the agents of the directories `--agents` names, a
+    /// git source provides, before adding it to a config.
     ///
     /// Reads the newest release unless `--revision` names another, and prints
-    /// each skill's path (the form a `repo` entry's `skills:` takes) and description, then the
+    /// each skill's path (the form a `repo` entry's `skills:` takes) and
+    /// description, each agent's with what its frontmatter grants, then the
     /// commit to pin. Writes nothing.
     Show {
         /// A git URL or a path to a git repository, as in `repo:`.
@@ -333,10 +346,44 @@ pub enum Command {
         #[arg(long, env = "POLLEN_PATH")]
         path: Option<PathBuf>,
 
+        /// Also list the agent files directly under PATH, checked against
+        /// the rules of CLIENT (`claude-code` or `opencode`):
+        /// `--agents claude-code:agents`.
+        ///
+        /// Repeat the flag for several directories. The environment variable
+        /// takes a comma-separated list.
+        #[arg(
+            long = "agents",
+            env = "POLLEN_AGENTS",
+            value_name = "CLIENT:PATH",
+            value_delimiter = ',',
+            value_parser = parse_agents
+        )]
+        agents: Vec<AgentDirectory>,
+
         /// Output format.
         #[arg(long, env = "POLLEN_FORMAT", value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+}
+
+/// Read a directory of agent files and the client whose rules they are
+/// checked against: `claude-code:agents`.
+fn parse_agents(text: &str) -> Result<AgentDirectory, String> {
+    let (client, path) = text
+        .split_once(':')
+        .filter(|(_, path)| !path.is_empty())
+        .ok_or_else(|| format!("`{text}` is not CLIENT:PATH, like `claude-code:agents`"))?;
+    let client = Client::ALL
+        .into_iter()
+        .find(|known| known.name() == client)
+        .ok_or_else(|| {
+            format!("unknown client `{client}`: expected `claude-code` or `opencode`")
+        })?;
+    Ok(AgentDirectory {
+        path: PathBuf::from(path),
+        client,
+    })
 }
 
 /// Read an age given as whole days or hours: `7d`, `36h`.
@@ -493,8 +540,19 @@ async fn run(cli: &Cli) -> Result<()> {
             repo,
             revision,
             path,
+            agents,
             format,
-        } => command::show::run(options, repo, revision.as_deref(), path.as_deref(), *format).await,
+        } => {
+            command::show::run(
+                options,
+                repo,
+                revision.as_deref(),
+                path.as_deref(),
+                agents,
+                *format,
+            )
+            .await
+        }
     }
 }
 
@@ -667,6 +725,41 @@ mod tests {
             assert_eq!(
                 <ClientChoice as ValueEnum>::from_str(choice.name(), false),
                 Ok(choice)
+            );
+        }
+    }
+
+    #[test]
+    fn show_takes_agent_directories_each_with_the_client_to_check_against() {
+        let cli = Cli::parse_from([
+            "pollen",
+            "show",
+            "https://example.invalid/x",
+            "--agents",
+            "claude-code:agents/claude",
+            "--agents",
+            "opencode:agents/opencode,claude-code:more",
+        ]);
+
+        let Command::Show { agents, .. } = cli.command else {
+            panic!("not a show invocation");
+        };
+        let parsed: Vec<_> = agents
+            .iter()
+            .map(|directory| (directory.client, directory.path.to_str().unwrap()))
+            .collect();
+        assert_eq!(
+            parsed,
+            [
+                (Client::ClaudeCode, "agents/claude"),
+                (Client::OpenCode, "agents/opencode"),
+                (Client::ClaudeCode, "more"),
+            ]
+        );
+        for value in ["agents", "all:agents", "claude-code:", "cursor:agents"] {
+            assert!(
+                Cli::try_parse_from(["pollen", "show", "x", "--agents", value]).is_err(),
+                "{value}"
             );
         }
     }

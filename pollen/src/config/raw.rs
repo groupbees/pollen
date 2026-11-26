@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 
 use super::{
-    Client, ClientChoice, Destination, IndexSelection, LOCAL_REPO, Repo, Selection, is_digest,
-    normalize_origin,
+    AgentSelection, Client, ClientChoice, Destination, IndexSelection, LOCAL_REPO, Repo, Selection,
+    is_digest, normalize_origin,
 };
 
 /// The newest format version this pollen reads.
@@ -192,7 +192,8 @@ impl ClientList {
     "else" = serde_json::json!({
         "required": ["revision"],
         "properties": {"revision": {"type": "string", "minLength": 1}}
-    })
+    }),
+    "anyOf" = serde_json::json!([{"required": ["skills"]}, {"required": ["agents"]}])
 ))]
 pub struct RepoV2 {
     /// A git URL, a path to a git repository, or `local` for the directory
@@ -206,9 +207,54 @@ pub struct RepoV2 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
     /// Where to look for skills inside the source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(length(min = 1, message = "at least one skill is required"), nested)]
     #[schemars(length(min = 1))]
-    pub skills: Vec<SkillsV2>,
+    pub skills: Option<Vec<SkillsV2>>,
+    /// Where to look for agent files inside the source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(
+        length(min = 1, message = "at least one agent path is required"),
+        nested
+    )]
+    #[schemars(length(min = 1))]
+    pub agents: Option<Vec<AgentsV2>>,
+}
+
+/// One directory of agent files inside a git or `local` source, in version
+/// 2, and where its agents go.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Validate, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[validate(schema(function = check_destination_of_agents, skip_on_field_errors = true))]
+#[schemars(extend("not" = serde_json::json!({"required": ["clients", "targets"]})))]
+pub struct AgentsV2 {
+    /// Directory holding the agent files, relative to the source root.
+    ///
+    /// Every file directly under it ending in `.md` is an agent, named after
+    /// the file; subdirectories are not searched.
+    #[validate(custom(function = check_contained_path))]
+    pub path: PathBuf,
+    /// Regular expression rejecting agents whose name, the file name without
+    /// `.md`, matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(function = check_regex))]
+    #[schemars(extend("format" = "regex"))]
+    pub exclude: Option<String>,
+    /// The clients these agents are deployed for, one or a list, instead of
+    /// the top-level `clients`: into each one's agent directory, checked
+    /// against each one's rules. Not with `targets`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(function = check_clients))]
+    pub clients: Option<ClientList>,
+    /// Directories these agents are deployed into, instead of the agent
+    /// directories of any client. Not with `clients`.
+    ///
+    /// A relative path resolves against the working directory, and a leading
+    /// `~` is expanded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(length(min = 1, message = "at least one target is required"))]
+    #[schemars(length(min = 1))]
+    pub targets: Option<Vec<PathBuf>>,
 }
 
 /// One place to look for skills inside a git or `local` source, in version
@@ -341,17 +387,20 @@ impl From<V1> for V2 {
                 (Some(repo), _) => repos.push(RepoV2 {
                     repo,
                     revision: entry.revision,
-                    skills: entry
-                        .paths
-                        .into_iter()
-                        .map(|spec| SkillsV2 {
-                            path: spec.path,
-                            recurse: spec.recurse,
-                            exclude: spec.exclude,
-                            clients: None,
-                            targets: v1.targets.clone(),
-                        })
-                        .collect(),
+                    skills: Some(
+                        entry
+                            .paths
+                            .into_iter()
+                            .map(|spec| SkillsV2 {
+                                path: spec.path,
+                                recurse: spec.recurse,
+                                exclude: spec.exclude,
+                                clients: None,
+                                targets: v1.targets.clone(),
+                            })
+                            .collect(),
+                    ),
+                    agents: None,
                 }),
                 (None, Some(url)) => discovery.push(DiscoveryV2 {
                     url,
@@ -391,15 +440,39 @@ impl RepoV2 {
     /// The model of a validated entry.
     #[must_use]
     pub fn into_model(self) -> Repo {
-        let paths = self.skills.into_iter().map(SkillsV2::into_model).collect();
+        let paths = self
+            .skills
+            .into_iter()
+            .flatten()
+            .map(SkillsV2::into_model)
+            .collect();
+        let agents = self
+            .agents
+            .into_iter()
+            .flatten()
+            .map(AgentsV2::into_model)
+            .collect();
         if self.repo == LOCAL_REPO {
-            Repo::Local { paths }
+            Repo::Local { paths, agents }
         } else {
             Repo::Git {
                 url: self.repo,
                 revision: self.revision.unwrap_or_default(),
                 paths,
+                agents,
             }
+        }
+    }
+}
+
+impl AgentsV2 {
+    /// The model of a validated item.
+    #[must_use]
+    pub fn into_model(self) -> AgentSelection {
+        AgentSelection {
+            path: self.path,
+            exclude: self.exclude,
+            destination: destination(self.clients.as_ref(), self.targets),
         }
     }
 }
@@ -494,6 +567,12 @@ fn check_sources_v2(v2: &V2) -> Result<(), ValidationError> {
 }
 
 fn check_repo_v2(repo: &RepoV2) -> Result<(), ValidationError> {
+    if repo.skills.is_none() && repo.agents.is_none() {
+        return Err(named_error(
+            "skills",
+            "a `repo` needs `skills`, `agents`, or both",
+        ));
+    }
     check_revision_matches_repo(Some(&repo.repo), repo.revision.as_deref())
 }
 
@@ -506,6 +585,10 @@ fn check_discovery_v2(origin: &DiscoveryV2) -> Result<(), ValidationError> {
 }
 
 fn check_destination_of_skills(item: &SkillsV2) -> Result<(), ValidationError> {
+    check_one_destination(item.clients.as_ref(), item.targets.as_ref())
+}
+
+fn check_destination_of_agents(item: &AgentsV2) -> Result<(), ValidationError> {
     check_one_destination(item.clients.as_ref(), item.targets.as_ref())
 }
 

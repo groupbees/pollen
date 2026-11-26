@@ -190,7 +190,7 @@ fn check_hidden_characters(dir: &Path, allow: bool) -> Result<(), SkillError> {
 ///
 /// A leading byte order mark is skipped: Windows editors and PowerShell's
 /// `Out-File -Encoding utf8` write one, and it would hide the opening `---`.
-fn split_frontmatter(text: &str) -> Option<&str> {
+pub(crate) fn split_frontmatter(text: &str) -> Option<&str> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let body = text
         .strip_prefix("---\n")

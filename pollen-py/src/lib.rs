@@ -6,11 +6,14 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use pollen::agent::Details;
 use pollen::cli::Options;
 use pollen::command;
 use pollen::command::autoupdate::DigestBump;
 use pollen::command::outdated::{Entry, Pending};
-use pollen::config::ClientChoice;
+use pollen::command::show::AgentDirectory;
+use pollen::config::{Client, ClientChoice};
+use pollen::state::Kind;
 use pollen::version::RemoteTag;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError};
@@ -159,17 +162,41 @@ fn update(
                         action: action(py, change.action)?,
                         name: &change.name,
                         origin: &change.origin,
+                        details: details(py, change.details.as_ref())?,
                     })
                 })
                 .collect::<PyResult<Vec<_>>>()?;
             record!(py, "Summary" {
                 target: &summary.target,
+                kind: kind(py, summary.kind)?,
                 changes: changes,
                 dry_run: summary.dry_run,
             })
         })
         .collect::<PyResult<Vec<_>>>()?;
     record!(py, "Report" { summaries: summaries })
+}
+
+fn kind(py: Python<'_>, kind: Kind) -> PyResult<Bound<'_, PyAny>> {
+    let value = match kind {
+        Kind::Skills => "skills",
+        Kind::Agents => "agents",
+    };
+    py.import("pollen._types")?.getattr("Kind")?.call1((value,))
+}
+
+fn details<'py>(py: Python<'py>, details: Option<&Details>) -> PyResult<Option<Bound<'py, PyAny>>> {
+    details
+        .map(|details| {
+            record!(py, "AgentDetails" {
+                tools: &details.tools,
+                model: &details.model,
+                permission: &details.permission,
+                hooks: details.hooks,
+                mcp_servers: details.mcp_servers,
+            })
+        })
+        .transpose()
 }
 
 fn action(py: Python<'_>, action: command::update::Action) -> PyResult<Bound<'_, PyAny>> {
@@ -204,32 +231,44 @@ fn list_installed(
     deployed
         .iter()
         .map(|deployed| {
-            let skills = deployed
-                .skills
-                .iter()
-                .map(|(name, skill)| {
-                    record!(py, "InstalledSkill" {
+            let mut skills = Vec::new();
+            let mut agents = Vec::new();
+            for (name, entry) in &deployed.entries {
+                match deployed.kind {
+                    Kind::Skills => skills.push(record!(py, "InstalledSkill" {
                         name: name,
-                        repo: &skill.repo,
-                        revision: &skill.revision,
-                        commit: &skill.commit,
-                        digest: &skill.digest,
-                        source_path: &skill.source_path,
-                        checksum: &skill.checksum,
-                    })
-                })
-                .collect::<PyResult<Vec<_>>>()?;
+                        repo: &entry.repo,
+                        revision: &entry.revision,
+                        commit: &entry.commit,
+                        digest: &entry.digest,
+                        source_path: &entry.source_path,
+                        checksum: &entry.checksum,
+                    })?),
+                    Kind::Agents => agents.push(record!(py, "InstalledAgent" {
+                        name: name,
+                        repo: &entry.repo,
+                        revision: &entry.revision,
+                        commit: &entry.commit,
+                        source_path: &entry.source_path,
+                        checksum: &entry.checksum,
+                    })?),
+                }
+            }
             record!(py, "Deployed" {
                 target: &deployed.target,
+                kind: kind(py, deployed.kind)?,
                 skills: skills,
+                agents: agents,
             })
         })
         .collect()
 }
 
-/// Check the config and, unless `config_only`, every skill it selects.
+/// Check the config and, unless `config_only`, every skill and agent it
+/// selects.
 ///
-/// Raises `PollenError` when the config is invalid or a selected skill is.
+/// Raises `PollenError` when the config is invalid or a selected skill or
+/// agent is.
 #[pyfunction]
 #[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, offline=false, credentials_file=None, config_only=false, pinned=false, allow_hidden_characters=false))]
 // One parameter per Python keyword argument, mirroring the CLI's flags.
@@ -269,11 +308,16 @@ fn validate(
     )?;
 
     if !validation.problems.is_empty() {
+        let messages: Vec<&str> = validation
+            .problems
+            .iter()
+            .map(|problem| problem.message.as_str())
+            .collect();
         return Err(PollenError::new_err(format!(
-            "{}: {} skill(s) are invalid:\n{}",
+            "{}: {}:\n{}",
             validation.path.display(),
-            validation.problems.len(),
-            validation.problems.join("\n"),
+            command::plan::describe(&validation.problems),
+            messages.join("\n"),
         )));
     }
     let skills = validation
@@ -294,10 +338,29 @@ fn validate(
                 .collect::<PyResult<Vec<_>>>()
         })
         .transpose()?;
+    let agents = validation
+        .agents
+        .map(|agents| {
+            agents
+                .iter()
+                .map(|agent| {
+                    record!(py, "PlannedAgent" {
+                        name: &agent.name,
+                        repo: &agent.repo,
+                        revision: &agent.revision,
+                        commit: &agent.commit,
+                        source_path: &agent.source_path,
+                        details: details(py, agent.details.as_ref())?,
+                    })
+                })
+                .collect::<PyResult<Vec<_>>>()
+        })
+        .transpose()?;
     record!(py, "Validation" {
         path: &validation.path,
         sources: validation.sources,
         skills: skills,
+        agents: agents,
     })
 }
 
@@ -457,9 +520,10 @@ fn migrate(
 }
 
 /// List the skills a git source provides, at its newest release unless
-/// `revision` names another, under `path` when given.
+/// `revision` names another, under `path` when given, and the agent files
+/// of each `(path, client)` of `agents`, checked against that client.
 #[pyfunction]
-#[pyo3(signature = (repo, *, revision=None, path=None, cache_dir=None, offline=false))]
+#[pyo3(signature = (repo, *, revision=None, path=None, agents=None, cache_dir=None, offline=false))]
 // pyo3 extracts a path only as an owned `PathBuf`.
 #[allow(clippy::needless_pass_by_value)]
 fn show<'py>(
@@ -467,14 +531,37 @@ fn show<'py>(
     repo: &str,
     revision: Option<&str>,
     path: Option<PathBuf>,
+    agents: Option<Vec<(PathBuf, String)>>,
     cache_dir: Option<PathBuf>,
     offline: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     let options = options(None, false, None, None, cache_dir, offline, None)?;
     let cache_dir = options.cache_dir();
+    let agents = agents
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(path, client)| {
+            let client = Client::ALL
+                .into_iter()
+                .find(|known| known.name() == client)
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "unknown client `{client}`: expected `claude-code` or `opencode`"
+                    ))
+                })?;
+            Ok(AgentDirectory { path, client })
+        })
+        .collect::<PyResult<Vec<_>>>()?;
     let listing = block_on(
         py,
-        command::show::inspect(repo, revision, path.as_deref(), &cache_dir, offline),
+        command::show::inspect(
+            repo,
+            revision,
+            path.as_deref(),
+            &agents,
+            &cache_dir,
+            offline,
+        ),
     )?;
 
     let skills = listing
@@ -489,12 +576,27 @@ fn show<'py>(
             })
         })
         .collect::<PyResult<Vec<_>>>()?;
+    let agents = listing
+        .agents
+        .iter()
+        .map(|entry| {
+            record!(py, "ListedAgent" {
+                path: &entry.path,
+                client: entry.client.name(),
+                name: &entry.name,
+                description: &entry.description,
+                details: details(py, entry.details.as_ref())?,
+                error: &entry.error,
+            })
+        })
+        .collect::<PyResult<Vec<_>>>()?;
     record!(py, "Listing" {
         repo: &listing.repo,
         revision: &listing.revision,
         release: &listing.release,
         commit: &listing.commit,
         skills: skills,
+        agents: agents,
     })
 }
 

@@ -25,20 +25,55 @@ pub use raw::{LATEST, PathSpec, SkillPin};
 pub const LOCAL_REPO: &str = "local";
 
 /// A client pollen deploys for, named as the product names itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Client {
     /// Claude Code.
     ClaudeCode,
     /// OpenCode.
+    #[serde(rename = "opencode")]
     OpenCode,
 }
 
-/// Where a client reads what pollen deploys, relative to the working
-/// directory, or to the home directory with `--global`.
+/// What pollen knows about a client: where it reads skills and agents, and
+/// what makes one of its agent files valid.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ClientSpec {
-    /// The directory holding the client's skills.
+    /// The directory holding the client's skills, relative to the working
+    /// directory, or to the home directory with `--global`.
     pub skills_dir: &'static str,
+    /// The directory holding the client's agents in a project, relative to
+    /// the working directory.
+    pub agents_dir: &'static str,
+    /// The directory holding the client's agents for the user, with
+    /// `--global`.
+    pub user_agents_dir: UserDir,
+    /// What an agent file's name ends with; the rest is the agent's name.
+    pub agent_suffix: &'static str,
+    /// How the client tells its agents apart.
+    pub identity: Identity,
+    /// The frontmatter fields an agent must set, each to a non-empty string.
+    pub required: &'static [&'static str],
+}
+
+/// A user-level directory, as the client locates it.
+#[derive(Debug, PartialEq, Eq)]
+pub enum UserDir {
+    /// Under the home directory.
+    Home(&'static str),
+    /// Under `$XDG_CONFIG_HOME`, or `~/.config` when it is unset or empty, on
+    /// every platform.
+    XdgConfig(&'static str),
+}
+
+/// How a client names an agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Identity {
+    /// The frontmatter `name`, which pollen requires to equal the file name
+    /// so two files cannot claim one agent.
+    NameField,
+    /// The file name.
+    FileName,
 }
 
 /// A client named in the config or on the command line: one client, or all
@@ -46,21 +81,22 @@ pub struct ClientSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientChoice {
-    /// Claude Code, into `.claude/skills`.
+    /// Claude Code, into `.claude/skills` and `.claude/agents`.
     ClaudeCode,
-    /// OpenCode, into `.agents/skills`.
+    /// OpenCode, into `.agents/skills` and `.opencode/agents`.
     #[serde(rename = "opencode")]
     OpenCode,
     /// Every client pollen knows.
     All,
 }
 
-/// Where an entry's skills go.
+/// Where an entry's skills or agents go.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Destination {
-    /// The skill directories of the config's top-level `clients`.
+    /// The directories of the config's top-level `clients`.
     Default,
-    /// The skill directories of these clients.
+    /// The directories of these clients: their skill directories for skills,
+    /// their agent directories for agents.
     Clients(Vec<Client>),
     /// These directories, as written.
     Targets(Vec<PathBuf>),
@@ -76,6 +112,11 @@ pub struct Scope {
     /// The directory client skill directories sit in: empty for the working
     /// directory, the home directory with `--global`.
     pub root: PathBuf,
+    /// The user's configuration directory, `$XDG_CONFIG_HOME` or
+    /// `~/.config`, with `--global`, where a client such as OpenCode reads
+    /// its user agents; `None` in a project, where every agent directory
+    /// sits in `root`.
+    pub user_config: Option<PathBuf>,
 }
 
 /// A parsed and validated `pollen.yaml`.
@@ -95,13 +136,15 @@ pub struct Config {
     pub file: PathBuf,
 }
 
-/// One source of skills, and what to take from it.
+/// One source of skills and agents, and what to take from it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Repo {
     /// The directory holding `pollen.yaml`.
     Local {
         /// Where to look for skills.
         paths: Vec<Selection>,
+        /// Where to look for agents.
+        agents: Vec<AgentSelection>,
     },
     /// A git repository, pinned to a revision.
     Git {
@@ -111,6 +154,8 @@ pub enum Repo {
         revision: String,
         /// Where to look for skills.
         paths: Vec<Selection>,
+        /// Where to look for agents.
+        agents: Vec<AgentSelection>,
     },
     /// An origin publishing an Agent Skills discovery index.
     WellKnown {
@@ -131,6 +176,27 @@ pub struct Selection {
     pub spec: PathSpec,
     /// Where they go.
     pub destination: Destination,
+}
+
+/// One directory of agent files inside a git or `local` source, and where
+/// they go.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSelection {
+    /// The directory, relative to the source root; the agent files directly
+    /// under it are taken.
+    pub path: PathBuf,
+    /// Regular expression rejecting agents by name.
+    pub exclude: Option<String>,
+    /// Where they go.
+    pub destination: Destination,
+}
+
+/// A directory an agent goes to, and the client reading it there, whose
+/// rules the agent must follow; `None` for a directory of `targets`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentDir {
+    pub dir: PathBuf,
+    pub client: Option<Client>,
 }
 
 /// Which skills a `well-known` source takes from its index.
@@ -226,8 +292,46 @@ impl Config {
         dedup(chosen)
     }
 
-    /// Every directory an entry of this config deploys into, in the order
-    /// they are first named.
+    /// The directories the agents of `destination` deploy into, each with
+    /// its client: none for a run with `--target`, which deploys skills
+    /// only; else the agent directories of the command line's clients, else
+    /// the entry's own `targets`, which have no client, else the agent
+    /// directories of its `clients`, else those of the config's `clients`.
+    #[must_use]
+    pub fn agent_directories(&self, destination: &Destination, scope: &Scope) -> Vec<AgentDir> {
+        let of_clients = |clients: &[Client]| {
+            clients
+                .iter()
+                .map(|client| AgentDir {
+                    dir: scope.agents_dir(*client),
+                    client: Some(*client),
+                })
+                .collect()
+        };
+        let chosen: Vec<AgentDir> = match (&scope.cli, destination) {
+            (Destination::Targets(_), _) => Vec::new(),
+            (Destination::Default, Destination::Default) => {
+                of_clients(self.clients.as_deref().unwrap_or(&Client::ALL))
+            }
+            (Destination::Clients(clients), _)
+            | (Destination::Default, Destination::Clients(clients)) => of_clients(clients),
+            (Destination::Default, Destination::Targets(targets)) => targets
+                .iter()
+                .map(|target| AgentDir {
+                    dir: expand_home(target),
+                    client: None,
+                })
+                .collect(),
+        };
+        let mut seen = BTreeSet::new();
+        chosen
+            .into_iter()
+            .filter(|agents| seen.insert(directory_key(&agents.dir)))
+            .collect()
+    }
+
+    /// Every directory an entry of this config deploys skills into, in the
+    /// order they are first named.
     #[must_use]
     pub fn all_directories(&self, scope: &Scope) -> Vec<PathBuf> {
         dedup(
@@ -235,6 +339,20 @@ impl Config {
                 .iter()
                 .flat_map(Repo::destinations)
                 .flat_map(|destination| self.directories(destination, scope))
+                .collect(),
+        )
+    }
+
+    /// Every directory an entry of this config deploys agents into, in the
+    /// order they are first named.
+    #[must_use]
+    pub fn all_agent_directories(&self, scope: &Scope) -> Vec<PathBuf> {
+        dedup(
+            self.repos
+                .iter()
+                .flat_map(Repo::agents)
+                .flat_map(|selection| self.agent_directories(&selection.destination, scope))
+                .map(|agents| agents.dir)
                 .collect(),
         )
     }
@@ -253,12 +371,30 @@ impl Scope {
         } else {
             Destination::Default
         };
+        let home = dirs::home_dir();
         let root = if global {
-            dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"))
+            home.clone().unwrap_or_else(|| PathBuf::from("~"))
         } else {
             PathBuf::new()
         };
-        Self { cli, root }
+        let user_config =
+            global.then(|| user_config_home(std::env::var_os("XDG_CONFIG_HOME"), home.as_deref()));
+        Self {
+            cli,
+            root,
+            user_config,
+        }
+    }
+
+    /// The agent directory of `client` in this scope.
+    #[must_use]
+    pub fn agents_dir(&self, client: Client) -> PathBuf {
+        let spec = client.spec();
+        match (&self.user_config, &spec.user_agents_dir) {
+            (None, _) => self.root.join(spec.agents_dir),
+            (Some(_), UserDir::Home(dir)) => self.root.join(dir),
+            (Some(config), UserDir::XdgConfig(dir)) => config.join(dir),
+        }
     }
 
     /// The skill directories of `clients`, in this scope.
@@ -274,6 +410,15 @@ impl Scope {
     #[must_use]
     pub fn overridden(&self) -> bool {
         self.cli != Destination::Default
+    }
+}
+
+/// Where a client following the XDG layout reads its user configuration, on
+/// every platform: a non-empty `$XDG_CONFIG_HOME`, else `~/.config`.
+fn user_config_home(xdg: Option<OsString>, home: Option<&Path>) -> PathBuf {
+    match xdg.filter(|xdg| !xdg.is_empty()) {
+        Some(xdg) => PathBuf::from(xdg),
+        None => home.map_or_else(|| PathBuf::from("~/.config"), |home| home.join(".config")),
     }
 }
 
@@ -313,13 +458,32 @@ impl Client {
     pub const fn spec(self) -> &'static ClientSpec {
         const CLAUDE_CODE: ClientSpec = ClientSpec {
             skills_dir: ".claude/skills",
+            agents_dir: ".claude/agents",
+            user_agents_dir: UserDir::Home(".claude/agents"),
+            agent_suffix: crate::agent::SUFFIX,
+            identity: Identity::NameField,
+            required: &["name", "description"],
         };
         const OPENCODE: ClientSpec = ClientSpec {
             skills_dir: ".agents/skills",
+            agents_dir: ".opencode/agents",
+            user_agents_dir: UserDir::XdgConfig("opencode/agents"),
+            agent_suffix: crate::agent::SUFFIX,
+            identity: Identity::FileName,
+            required: &["description"],
         };
         match self {
             Self::ClaudeCode => &CLAUDE_CODE,
             Self::OpenCode => &OPENCODE,
+        }
+    }
+
+    /// The name the config and the command line give this client.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            Self::OpenCode => "opencode",
         }
     }
 
@@ -333,6 +497,12 @@ impl Client {
             }
         }
         clients
+    }
+}
+
+impl std::fmt::Display for Client {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.name())
     }
 }
 
@@ -437,28 +607,36 @@ fn deserialize<T: DeserializeOwned>(text: &str, version: u32, path: &Path) -> Re
 }
 
 /// What a file that does not parse most likely meant, when it uses a key of
-/// one version in the other: version 2's `clients` or `discovery` in
-/// version 1, a top-level `targets`, a `repo`'s `paths` or a `well-known`
-/// entry in version 2, or a `repo`'s `skills` in version 1. Read from the YAML itself, so it does not
-/// depend on how serde words its error.
+/// one version in the other: version 2's `clients`, `discovery` or a
+/// `repo`'s `agents` in version 1, a top-level `targets`, a `repo`'s `paths`
+/// or a `well-known` entry in version 2, or a `repo`'s `skills` in version 1.
+/// Read from the YAML itself, so it does not depend on how serde words its
+/// error.
 fn version_hint(text: &str, version: u32) -> Option<&'static str> {
     let document: serde_norway::Value = serde_norway::from_str(text).ok()?;
-    if version == 1 && (document.get("clients").is_some() || document.get("discovery").is_some()) {
-        return Some(
-            "`clients` and `discovery` need `version: 2`: take them out, run `pollen config migrate`, then put them back",
-        );
-    }
-    if version == 2 && document.get("targets").is_some() {
-        return Some(
-            "version 2 names `targets` on each item of a `repo`'s `skills` and on each `discovery` entry, not at the top level",
-        );
-    }
-    let repos = document.get("repos")?.as_sequence()?;
+    let repos = document
+        .get("repos")
+        .and_then(serde_norway::Value::as_sequence)
+        .map_or(&[][..], Vec::as_slice);
     let uses = |key: &str| {
         repos
             .iter()
             .any(|entry| entry.get("repo").is_some() && entry.get(key).is_some())
     };
+    if version == 1
+        && (document.get("clients").is_some()
+            || document.get("discovery").is_some()
+            || uses("agents"))
+    {
+        return Some(
+            "`clients`, `discovery` and `agents` need `version: 2`: take them out, run `pollen config migrate`, then put them back",
+        );
+    }
+    if version == 2 && document.get("targets").is_some() {
+        return Some(
+            "version 2 names `targets` on each item of a `repo`'s `skills` or `agents` and on each `discovery` entry, not at the top level",
+        );
+    }
     match version {
         1 if uses("skills") => {
             Some("a `repo` lists where to look under `paths`, or under `skills` with `version: 2`")
@@ -518,7 +696,17 @@ impl Repo {
     #[must_use]
     pub fn paths(&self) -> &[Selection] {
         match self {
-            Self::Local { paths } | Self::Git { paths, .. } => paths,
+            Self::Local { paths, .. } | Self::Git { paths, .. } => paths,
+            Self::WellKnown { .. } => &[],
+        }
+    }
+
+    /// Where to look for agents inside a git or `local` source; empty for a
+    /// `well-known` one, whose index lists skills only.
+    #[must_use]
+    pub fn agents(&self) -> &[AgentSelection] {
+        match self {
+            Self::Local { agents, .. } | Self::Git { agents, .. } => agents,
             Self::WellKnown { .. } => &[],
         }
     }
@@ -565,6 +753,18 @@ pub fn normalize_origin(text: &str) -> Option<String> {
         && url.query().is_none()
         && url.fragment().is_none();
     bare.then(|| url.origin().ascii_serialization())
+}
+
+impl AgentSelection {
+    /// The compiled `exclude` pattern.
+    ///
+    /// # Errors
+    ///
+    /// When the pattern is not a valid regular expression, which validation
+    /// already rules out for a config read by [`Config::load`].
+    pub fn exclude_regex(&self) -> Result<Option<Regex>> {
+        compile(self.exclude.as_deref())
+    }
 }
 
 impl PathSpec {
@@ -686,6 +886,7 @@ mod tests {
             url,
             revision,
             paths,
+            ..
         } = &config.repos[0]
         else {
             panic!("not a git source: {:?}", config.repos[0]);
@@ -1159,7 +1360,7 @@ mod tests {
             "{well_known_in_v2:#}"
         );
         assert!(
-            format!("{discovery_in_v1:#}").contains("`discovery` need `version: 2`"),
+            format!("{discovery_in_v1:#}").contains("`discovery` and `agents` need `version: 2`"),
             "{discovery_in_v1:#}"
         );
 
@@ -1497,9 +1698,238 @@ mod tests {
                 .unwrap_err();
 
         assert!(
-            format!("{error:#}").contains("`clients` and `discovery` need `version: 2`"),
+            format!("{error:#}").contains("`clients`, `discovery` and `agents` need `version: 2`"),
             "{error:#}"
         );
+    }
+
+    const AGENTS: &str = "version: 2\nrepos:\n  - repo: https://x.example/a.git\n    revision: v1\n    agents:\n      - path: agents\n        exclude: ^README$\n      - path: claude\n        clients: claude-code\n      - path: shared\n        targets: [out, ~/agents]\n  - repo: local\n    skills:\n      - path: skills\n    agents:\n      - path: mine\n";
+
+    #[test]
+    fn a_repo_declares_agents_beside_or_instead_of_skills() {
+        let config = parse(AGENTS).unwrap();
+
+        let git = &config.repos[0];
+        assert!(git.paths().is_empty());
+        let destinations: Vec<_> = git
+            .agents()
+            .iter()
+            .map(|agents| agents.destination.clone())
+            .collect();
+        assert_eq!(
+            destinations,
+            [
+                Destination::Default,
+                Destination::Clients(vec![Client::ClaudeCode]),
+                Destination::Targets(vec![PathBuf::from("out"), PathBuf::from("~/agents")]),
+            ]
+        );
+        assert!(
+            git.agents()[0]
+                .exclude_regex()
+                .unwrap()
+                .unwrap()
+                .is_match("README")
+        );
+        assert_eq!(config.repos[1].paths().len(), 1);
+        assert_eq!(config.repos[1].agents()[0].path, PathBuf::from("mine"));
+    }
+
+    #[test]
+    fn rejects_an_agents_item_breaking_a_rule() {
+        for (agents, expected) in [
+            (
+                "      - path: a\n        client: opencode\n",
+                "unknown field `client`",
+            ),
+            (
+                "      - path: a\n        clients: cursor\n",
+                "`clients` takes",
+            ),
+            (
+                "      - path: a\n        clients: []\n",
+                "at least one client",
+            ),
+            (
+                "      - path: a\n        targets: []\n",
+                "at least one target",
+            ),
+            (
+                "      - path: a\n        clients: opencode\n        targets: [out]\n",
+                "either `clients` or `targets`",
+            ),
+            ("      - exclude: ^a\n", "missing field `path`"),
+            ("      - path: ../a\n", "climb"),
+            (
+                "      - path: a\n        exclude: \"[\"\n",
+                "regular expression",
+            ),
+            (
+                "      - path: a\n        recurse: true\n",
+                "unknown field `recurse`",
+            ),
+        ] {
+            let error = parse(&format!(
+                "version: 2\nrepos:\n  - repo: local\n    agents:\n{agents}"
+            ))
+            .unwrap_err();
+            assert!(
+                format!("{error:#}").contains(expected),
+                "{agents}: {error:#}"
+            );
+        }
+        let empty = parse("version: 2\nrepos:\n  - repo: local\n    agents: []\n").unwrap_err();
+        assert!(
+            format!("{empty:#}").contains("at least one agent path"),
+            "{empty:#}"
+        );
+        let neither = parse("version: 2\nrepos:\n  - repo: local\n").unwrap_err();
+        assert!(
+            format!("{neither:#}").contains("needs `skills`, `agents`, or both"),
+            "{neither:#}"
+        );
+    }
+
+    #[test]
+    fn a_discovery_origin_takes_no_agents() {
+        let error = parse(
+            "version: 2\ndiscovery:\n  - url: https://x.example\n    agents:\n      - path: a\n",
+        )
+        .unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("unknown field `agents`"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn points_agents_in_version_one_at_version_two() {
+        let error = parse(
+            "repos:\n  - repo: local\n    paths:\n      - path: .\n    agents:\n      - path: a\n",
+        )
+        .unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("`agents` need `version: 2`"),
+            "{error:#}"
+        );
+    }
+
+    fn agent_dirs(dirs: &[AgentDir]) -> Vec<(String, Option<Client>)> {
+        dirs.iter()
+            .map(|agents| {
+                (
+                    agents.dir.to_string_lossy().replace('\\', "/"),
+                    agents.client,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn agents_go_to_the_agent_directories_of_their_clients_or_to_their_targets() {
+        let config = parse(AGENTS).unwrap();
+        let [default, claude, shared] = config.repos[0].agents() else {
+            panic!("three agents items");
+        };
+        let home = dirs::home_dir().unwrap();
+
+        assert_eq!(
+            agent_dirs(&config.agent_directories(&default.destination, &plain())),
+            [
+                (".claude/agents".to_owned(), Some(Client::ClaudeCode)),
+                (".opencode/agents".to_owned(), Some(Client::OpenCode)),
+            ]
+        );
+        assert_eq!(
+            agent_dirs(&config.agent_directories(&claude.destination, &plain())),
+            [(".claude/agents".to_owned(), Some(Client::ClaudeCode))]
+        );
+        assert_eq!(
+            agent_dirs(&config.agent_directories(&shared.destination, &plain())),
+            [
+                ("out".to_owned(), None),
+                (
+                    home.join("agents").to_string_lossy().replace('\\', "/"),
+                    None
+                ),
+            ]
+        );
+        assert_eq!(
+            strings(&config.all_agent_directories(&plain()))[..3],
+            [".claude/agents", ".opencode/agents", "out"]
+        );
+    }
+
+    #[test]
+    fn the_top_level_clients_pick_the_agent_directories_of_an_item_naming_none() {
+        let config =
+            parse(&AGENTS.replace("version: 2\n", "version: 2\nclients: opencode\n")).unwrap();
+
+        assert_eq!(
+            agent_dirs(&config.agent_directories(&Destination::Default, &plain())),
+            [(".opencode/agents".to_owned(), Some(Client::OpenCode))]
+        );
+    }
+
+    #[test]
+    fn a_cli_target_sends_no_agent_anywhere_and_a_cli_client_to_its_agent_directory() {
+        let config = parse(AGENTS).unwrap();
+        let shared = &config.repos[0].agents()[2].destination;
+
+        let target = Scope::new(&[PathBuf::from("out")], &[], false);
+        let client = Scope::new(&[], &[Client::OpenCode], false);
+
+        assert!(config.agent_directories(shared, &target).is_empty());
+        assert!(config.all_agent_directories(&target).is_empty());
+        assert_eq!(
+            agent_dirs(&config.agent_directories(shared, &client)),
+            [(".opencode/agents".to_owned(), Some(Client::OpenCode))]
+        );
+    }
+
+    #[test]
+    fn user_agent_directories_follow_each_clients_layout() {
+        let root = PathBuf::from("/home/me");
+        let config = std::env::temp_dir().join("xdg");
+        let scope = Scope {
+            cli: Destination::Default,
+            root: root.clone(),
+            user_config: Some(config.clone()),
+        };
+        let project = Scope {
+            cli: Destination::Default,
+            root: root.clone(),
+            user_config: None,
+        };
+
+        assert_eq!(
+            scope.agents_dir(Client::ClaudeCode),
+            root.join(".claude/agents")
+        );
+        assert_eq!(
+            scope.agents_dir(Client::OpenCode),
+            config.join("opencode/agents")
+        );
+        assert_eq!(
+            project.agents_dir(Client::OpenCode),
+            root.join(".opencode/agents")
+        );
+    }
+
+    #[test]
+    fn the_user_configuration_follows_xdg_config_home_else_dot_config_on_every_platform() {
+        let home = PathBuf::from("/home/me");
+        let xdg = std::env::temp_dir().join("xdg");
+
+        assert_eq!(
+            user_config_home(Some(xdg.clone().into_os_string()), Some(&home)),
+            xdg
+        );
+        for unset in [None, Some(OsString::new())] {
+            assert_eq!(user_config_home(unset, Some(&home)), home.join(".config"));
+        }
     }
 
     #[test]

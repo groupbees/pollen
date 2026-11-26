@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::Options;
 use crate::config::{Client, Config, Scope, directory_key};
 use crate::source::Fetcher;
-use crate::state::State;
+use crate::state::{Kind, State};
 
 /// Everything a subcommand needs, resolved from the CLI and the config file.
 pub struct Context {
@@ -49,9 +49,10 @@ impl Context {
         Ok(Self { config, scope })
     }
 
-    /// Every directory a run visits: see [`directories`].
+    /// Every directory a run visits, with what it holds: see
+    /// [`directories`].
     #[must_use]
-    pub fn directories(&self) -> Vec<PathBuf> {
+    pub fn directories(&self) -> Vec<(PathBuf, Kind)> {
         directories(&self.config, &self.scope)
     }
 
@@ -66,21 +67,46 @@ impl Context {
     }
 }
 
-/// Every directory a run of `config` visits, in order: those its entries
-/// deploy into, then, unless the command line overrides every destination,
-/// each known client skill directory in `scope` whose state file names
+/// Every directory a run of `config` visits, in order, with what it holds:
+/// those its entries deploy skills into, those they deploy agents into,
+/// then, unless the command line overrides every destination, each known
+/// client skill or agent directory in `scope` whose state file names
 /// `config`, so what the config stopped sending there is pruned.
+///
+/// A directory named twice, in any spelling, is visited once, as the kind
+/// it is first named for.
 #[must_use]
-pub fn directories(config: &Config, scope: &Scope) -> Vec<PathBuf> {
-    let mut dirs = config.all_directories(scope);
+pub fn directories(config: &Config, scope: &Scope) -> Vec<(PathBuf, Kind)> {
+    let mut dirs: Vec<(PathBuf, Kind)> = Vec::new();
+    let mut visit = |dir: PathBuf, kind: Kind| {
+        let key = directory_key(&dir);
+        if !dirs.iter().any(|(named, _)| directory_key(named) == key) {
+            dirs.push((dir, kind));
+        }
+    };
+    for dir in config.all_directories(scope) {
+        visit(dir, Kind::Skills);
+    }
+    for dir in config.all_agent_directories(scope) {
+        visit(dir, Kind::Agents);
+    }
     if scope.overridden() || config.file.as_os_str().is_empty() {
         return dirs;
     }
-    for dir in scope.client_dirs(&Client::ALL) {
+    let known = scope
+        .client_dirs(&Client::ALL)
+        .into_iter()
+        .map(|dir| (dir, Kind::Skills))
+        .chain(
+            Client::ALL
+                .into_iter()
+                .map(|client| (scope.agents_dir(client), Kind::Agents)),
+        );
+    for (dir, kind) in known {
         let key = directory_key(&dir);
-        let named = dirs.iter().any(|named| directory_key(named) == key);
+        let named = dirs.iter().any(|(named, _)| directory_key(named) == key);
         if !named && owned_by(&dir, &config.file) {
-            dirs.push(dir);
+            dirs.push((dir, kind));
         }
     }
     dirs
