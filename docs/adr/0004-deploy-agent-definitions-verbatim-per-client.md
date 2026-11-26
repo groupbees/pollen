@@ -24,8 +24,7 @@ makes an agent worth writing:
 | Model | an alias (`opus`) | `provider/model#variant` |
 
 OpenCode reads skills from `.agents/skills/`, the cross-client directory
-other clients scan too. `clients`
-([#83](https://github.com/groupbees/pollen/pull/83)) maps a client to one
+other clients scan too. The version 2 `clients` key maps a client to one
 skill directory, with `claude` for Claude Code and `agent-skills` standing
 for that cross-client directory rather than for a client, and is mutually
 exclusive with `targets`. Claude Code plugins already distribute agents, for
@@ -37,8 +36,8 @@ Claude Code only, through a marketplace.
 holding no state, that a client reads from a directory it knows. Agents
 qualify; a client whose agents live inside a shared config file
 (`opencode.json`) is refused rather than adapted, since pollen owns whole
-entries recorded in its state file, never parts of a file. `well-known`
-sources stay skills-only: the v0.2.0 index has no agent type.
+entries recorded in its state file, never parts of a file. `discovery`
+origins stay skills-only: the v0.2.0 index has no agent type.
 
 **Verbatim, per client.** An agent file is copied byte for byte into the
 agent directory of the one client it was written for. pollen never
@@ -61,8 +60,11 @@ skill directory, once its behaviour is checked; the deduplication of target
 directories keeps one copy. A client the table does not list is served
 through `targets`.
 
-**Declaring agents.** A `repo` or `local` entry takes an `agents:` list beside
-`paths:`. Each item names a `path`, a required `client` — never inferred from
+**Declaring agents.** A git or `local` entry of `repos` takes an `agents:`
+list beside `skills:`. Following
+[ADR 0003](0003-version-the-config-format.md), it is a new optional key of
+version 2, which does not move the version; a version 1 file using it is
+refused with a hint to migrate, as `clients` is. Each item names a `path`, a required `client` — never inferred from
 the content — and an optional `exclude`. The files directly under `path` with
 that client's extension are agents; a file whose frontmatter is invalid fails
 the run, as a skill does. The plan is keyed by kind, client and name, so a
@@ -72,9 +74,9 @@ skill and an agent, or one name across two clients, do not collide.
 
 - `clients` defaults to `all`, every client pollen knows, and `all` grows as
   pollen learns clients. With `claude-code` and `opencode`, it writes the
-  same skill directories as the default before agents. An agent is deployed only for a client in `clients`
-  that the config declares agents for, and a directory is created only when
-  something is planned for it.
+  same skill directories as the default before agents. An agent is deployed
+  only for a client in `clients` that the config declares agents for, and a
+  directory is created only when something is planned for it.
 - `targets` and `clients` combine: `targets` replaces the skill directories
   only, and agent directories always come from `clients`.
 - A run with `--target` deploys skills only, into those directories, and
@@ -90,16 +92,17 @@ entry is a file; its staging copy is a dot-prefixed name without the agent
 extension, so no client loads it. The state version moves to 2; a version 1
 file reads as `skills`.
 
-**Review.** The invisible-character check ([#82](https://github.com/groupbees/pollen/pull/82)) applies to agent files.
+**Review.** The invisible-character check
+([#82](https://github.com/groupbees/pollen/pull/82)) applies to agent files.
 `show` and the `update` summary display, for each agent, its tools, model,
 permission mode and whether it declares hooks or MCP servers.
 
 ```mermaid
 flowchart LR
     yaml[pollen.yaml] --> config[config]
-    config -->|paths| discovery[discovery]
+    config -->|skills| skilldiscovery[skill discovery]
     config -->|agents + client| agents[agent selection]
-    discovery --> skill[skill validation]
+    skilldiscovery --> skill[skill validation]
     agents --> agentcheck[per-client validation]
     clients[(client table)] --> plan
     skill --> plan[plan, keyed by kind, client, name]
@@ -134,11 +137,12 @@ flowchart LR
 - No value selects "every client reading `.agents/skills`": a user of a
   client absent from the table writes `targets: [.agents/skills]`, and
   widening that set takes a release per client.
-- #83's surface — `clients`, `--client`, `POLLEN_CLIENTS`, `clients=` — stays,
-  with `claude-code` and `opencode` as its values instead of `claude` and
-  `agent-skills`; its one-directory `Client` becomes the table, and its
-  exclusivity between `targets` and `clients` goes. No release carries the
-  old values.
+- The `clients` surface — the key, `--client`, `POLLEN_CLIENTS`, `clients=`
+  in Python — stays, with `claude-code` and `opencode` as its values instead
+  of `claude` and `agent-skills`; the one-directory `Client` becomes the
+  table, and the exclusivity between `targets` and `clients` goes. Version 2
+  and `clients` are unreleased, so the renaming lands before the first
+  release that carries them, and no release ships the old values.
 
 ## Alternatives considered
 
