@@ -116,6 +116,15 @@ the version picker and the link rewriting:
 task test:docs
 ```
 
+[scripts/release.sh](scripts/release.sh) is checked against a throwaway
+repository and a local bare origin: it refuses a tag that exists locally or on
+origin, and refuses to go on when origin's tags cannot be listed. It only ever
+runs the script with `--dry-run`, and needs Python 3.11 or later:
+
+```sh
+task test:release
+```
+
 pollen is also checked against a real gateway: a LiteLLM proxy and its
 Postgres, from [tests/litellm/docker-compose.yaml](tests/litellm/docker-compose.yaml).
 The script uploads the skills under

@@ -82,6 +82,15 @@ behind="$(git rev-list --count "HEAD..origin/${branch}")"
 [ "$behind" -eq 0 ] ||
   die "${branch} is ${behind} commit(s) behind origin; pull first"
 
+# 2 is "no such ref"; any other failure leaves the question open.
+remote_tag=0
+git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null || remote_tag=$?
+case "$remote_tag" in
+  0) die "the tag ${tag} already exists on origin" ;;
+  2) ;;
+  *) die "cannot list the tags on origin" ;;
+esac
+
 if [ "$dry_run" = true ]; then
   cat <<EOF
 version: ${current} -> ${version}
