@@ -42,3 +42,6 @@ jobs:
           RENOVATE_ONBOARDING: "false"
           RENOVATE_DRY_RUN: ${{ inputs.dryRun && 'full' || '' }}
           LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
+          # Updating mise.lock runs `mise lock`, which Renovate otherwise refuses,
+          # and then leaves mise.toml unchanged too.
+          RENOVATE_ALLOWED_UNSAFE_EXECUTIONS: mise

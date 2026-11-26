@@ -10,18 +10,18 @@ default_stages:
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
-        exclude: ^docs/package-lock\.json$
+        exclude: ^(.*/)?(package-lock\.json|uv\.lock|Cargo\.lock)$
       - id: check-merge-conflict
       - id: detect-private-key
 
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.38.0
+    rev: cba56bcde1fdd01c1deb3f945e69764c291a6530  # frozen: v1.38.0
     hooks:
       - id: yamllint
         # Warning-level rules are printed and then ignored without this.
@@ -29,7 +29,7 @@ repos:
           - --strict
 
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.12
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca  # frozen: v1.7.12
     hooks:
       - id: actionlint
 
@@ -43,14 +43,24 @@ repos:
           - --strict
           - --no-global
 
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 39478bf2c099a58683d3f1aedf675105318b078d  # frozen: 0.39.0
+    hooks:
+      - id: check-taskfile
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: a6564f5d57444e123433a5c9af733e3975c77229  # frozen: v0.11.0.1-1
+    hooks:
+      - id: shellcheck
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.1
+    rev: 9026c9127e153371d7a78dfcb0c45ae2046a3d10  # frozen: v0.17.6
     hooks:
       - id: ruff-check
       - id: ruff-format
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.13.5
+    rev: 81f5f4cd875cc74ecfdfae601ae47d3fd200ad8d  # frozen: 0.13.10
     hooks:
       - id: uv-lock
         files: ^pollen-py/(pyproject\.toml|uv\.lock)$
@@ -68,6 +78,13 @@ repos:
           - --ignore-case
         stages:
           - commit-msg
+
+      - id: mise-fmt
+        name: mise fmt
+        entry: mise fmt
+        language: system
+        files: ^mise\.toml$
+        pass_filenames: false
 
       - id: cargo-fmt
         name: cargo fmt
@@ -112,13 +129,6 @@ repos:
         language: system
         pass_filenames: false
         files: ^(pollen/src/config/.*\.rs|pollen/src/schema\.rs|schema/pollen\.schema\.json)$
-
-      - id: shellcheck
-        name: shellcheck
-        entry: shellcheck
-        language: system
-        types:
-          - shell
 
       - id: docs-biome
         name: biome check the documentation site

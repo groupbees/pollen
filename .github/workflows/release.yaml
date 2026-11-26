@@ -55,8 +55,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: install the pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
+      - name: install the tools
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
+        with:
+          cache: false
+          install_args: rust
 
       - name: install cargo-cyclonedx
         run: cargo install --locked cargo-cyclonedx@0.5.10
@@ -123,16 +126,22 @@ jobs:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      - name: install the tools
+        id: mise
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
+        with:
+          cache: false
+          install_args: rust uv
+
+      # The manylinux builds run in a container whose rustup never sees the
+      # mise environment, so the pinned toolchain is passed explicitly.
       - name: build the wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b  # v1.51.0
         with:
+          rust-toolchain: ${{ steps.mise.outputs.rust }}
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'off' }}
           args: --release --locked --manifest-path pollen-py/Cargo.toml --out dist
-
-      - name: set up uv
-        if: ${{ matrix.smoke }}
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
 
       - name: check that the wheel imports
         if: ${{ matrix.smoke }}

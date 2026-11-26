@@ -1,9 +1,8 @@
 # Contributing
 
 Issues and pull requests go to
-<https://github.com/groupbees/pollen>. The short version: install the
-toolchain, run `pre-commit install`, keep `cargo test` and the Python tests
-green.
+<https://github.com/groupbees/pollen>. The short version: install mise, run `task setup`, keep `task test` and
+`task lint` green.
 
 Report a bug in a [GitHub issue](https://github.com/groupbees/pollen/issues),
 with the version (`pollen --version`), the operating system, the
@@ -13,88 +12,59 @@ describes, never in a public issue or pull request.
 
 ## Development setup
 
-The toolchain version is pinned in
-[rust-toolchain.toml](rust-toolchain.toml); `rustup` installs it on the first
-`cargo` invocation, with `rustfmt` and `clippy`.
+[mise](https://mise.jdx.dev) installs every tool at the version
+[mise.toml](mise.toml) pins: the Rust toolchain with `rustfmt` and `clippy`,
+Python, uv, Node.js for the documentation site, Task, pre-commit, Trivy, and
+`cargo-edit` for cutting a release. [mise.lock](mise.lock) holds their
+checksums.
 
-Install `rustup` (works the same on macOS and Linux):
+Install mise and hook it into your shell, as its
+[installation guide](https://mise.jdx.dev/installing-mise.html) describes
+(works the same on macOS and Linux):
 
 ```sh
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+curl https://mise.run | sh
 ```
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), which
-builds the Python bindings, runs their tests and the `pyright` hook (works the
-same on macOS and Linux):
+Then, from a fresh clone, trust the repository's config, install the tools,
+and install the documentation site's dependencies and the git hooks:
 
 ```sh
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Install `pre-commit`:
-
-```sh
-uv tool install pre-commit
-```
-
-Install `shellcheck`, which the shell hook shells out to:
-
-**macOS**
-
-```sh
-brew install shellcheck
-```
-
-**Linux**
-
-```sh
-sudo apt install -y shellcheck
-```
-
-Install Node.js at the version in [docs/.nvmrc](docs/.nvmrc), for the
-documentation site and its hooks, from <https://nodejs.org/en/download> or
-any version manager that reads `.nvmrc`.
-
-`cargo-edit` is needed only to cut a release:
-
-```sh
-cargo install cargo-edit --locked
-```
-
-Then, from a fresh clone:
-
-```sh
-pre-commit install
+mise trust
 ```
 
 ```sh
-npm ci --prefix docs
+mise install
 ```
 
 ```sh
-cargo test
+task setup
 ```
 
-```sh
-uv run --directory pollen-py pytest
-```
-
-A green `cargo test` and a green `pytest` mean the setup is good. See the
+A green `task test` means the setup is good; `task --list` shows the other
+tasks, defined in [Taskfile.yml](Taskfile.yml). See the
 [documentation](https://groupbees.github.io/pollen/) for running the tool
 itself.
 
 ## Running the tests
 
-The whole suite, which must be green before a pull request:
+The whole suite — Rust, the Python bindings and the documentation site —
+which must be green before a pull request:
 
 ```sh
-cargo test --all-targets
+task test
+```
+
+The Rust tests alone:
+
+```sh
+task test:rust
 ```
 
 A single test, while iterating:
 
 ```sh
-cargo test --lib config::tests::rejects_a_git_repo_without_a_revision
+task test:rust -- --lib config::tests::rejects_a_git_repo_without_a_revision
 ```
 
 The workspace holds two crates: [pollen/](pollen/), the library and the CLI,
@@ -128,11 +98,11 @@ The Python bindings are tested from Python, with pytest, in
 maturin first, and rebuilds it whenever a Rust source in either crate changes:
 
 ```sh
-uv run --directory pollen-py pytest
+task test:python
 ```
 
 ```sh
-uv run --directory pollen-py pytest -k show
+task test:python -- -k show
 ```
 
 They build git repositories in temporary directories, like the end-to-end
@@ -143,7 +113,7 @@ The documentation site has its own unit tests, for the version planning,
 the version picker and the link rewriting:
 
 ```sh
-npm --prefix docs test
+task test:docs
 ```
 
 pollen is also checked against a real gateway: a LiteLLM proxy and its
@@ -151,21 +121,21 @@ Postgres, from [tests/litellm/docker-compose.yaml](tests/litellm/docker-compose.
 The script uploads the skills under
 [tests/litellm/skills/](tests/litellm/skills/), then deploys, freezes,
 validates and re-checks them through the proxy's `well-known` index. It is
-not part of `cargo test`, which stays offline: it pulls images and starts
+not part of `task test`, which stays offline: it pulls images and starts
 services. It needs Docker with Compose, `curl` and `zip`, and port 4000 free
 (`POLLEN_LITELLM_PORT` picks another):
 
 ```sh
-tests/litellm.sh
+task test:litellm
 ```
 
 The Homebrew formula generator is checked against a fabricated `SHA256SUMS`
 by a script that renders the formula, runs `brew style` and `brew audit` on it
 in a throwaway local tap, and checks that a missing archive is refused. It
-needs [Homebrew](https://brew.sh) on `PATH`:
+needs [Homebrew](https://brew.sh) on `PATH`, so the task runs on macOS only:
 
 ```sh
-tests/homebrew-formula.sh
+task test:homebrew
 ```
 
 New behaviour comes with tests, and a fix comes with the regression test that
@@ -173,13 +143,13 @@ would have caught it.
 
 ## Pre-commit hooks
 
-`pre-commit install` puts the gate in place, for both the `pre-commit` and
+`task setup` runs `pre-commit install`, which puts the gate in place, for both the `pre-commit` and
 the `commit-msg` stages; the hooks must pass before a push.
 
-The whole repo:
+The whole repo, as CI runs it:
 
 ```sh
-pre-commit run --all-files
+task lint
 ```
 
 One hook, while iterating:
@@ -222,19 +192,18 @@ commit gate stays fast.
 
 | Workflow | Purpose | Reproduce locally |
 | --- | --- | --- |
-| [quality.yaml](.github/workflows/quality.yaml) | The merge gate: hooks, tests on Linux and Windows, the LiteLLM and Homebrew checks, release builds | `pre-commit run --all-files`, `cargo test --all-targets --locked`, `uv run --directory pollen-py pytest`, `npm --prefix docs test`, `tests/litellm.sh`, `tests/homebrew-formula.sh` |
-| [binaries.yaml](.github/workflows/binaries.yaml) | The release archive of every target, for `quality` and `release` | `cargo build --release --locked --target <target>`; for musl, on Linux of the same architecture with `musl-tools`, prefixed with `CC_x86_64_unknown_linux_musl=musl-gcc` (or `CC_aarch64_unknown_linux_musl`) |
-| [docs.yaml](.github/workflows/docs.yaml) | Every version of the documentation site, links validated, deployed to GitHub Pages from `main` | `git fetch --tags` then `npm --prefix docs run build:versions` |
+| [quality.yaml](.github/workflows/quality.yaml) | The merge gate: hooks, tests on Linux and Windows, the LiteLLM and Homebrew checks, release builds | `task lint`, `task test`, `task test:litellm`, `task test:homebrew` |
+| [binaries.yaml](.github/workflows/binaries.yaml) | The release archive of every target, for `quality` and `release` | `task build -- --target <target>`; for musl, on Linux of the same architecture with `musl-tools`, prefixed with `CC_x86_64_unknown_linux_musl=musl-gcc` (or `CC_aarch64_unknown_linux_musl`) |
+| [docs.yaml](.github/workflows/docs.yaml) | Every version of the documentation site, links validated, deployed to GitHub Pages from `main` | `git fetch --tags` then `task docs:build` |
 | [security.yaml](.github/workflows/security.yaml) | Trivy scan of the repository | `trivy fs .` |
 | [scorecard.yaml](.github/workflows/scorecard.yaml) | OpenSSF Scorecard analysis, for the README badge | none: it reads the repository's settings on GitHub |
 | [renovate.yaml](.github/workflows/renovate.yaml) | Dependency and security update pull requests, from Dependabot alerts and [OSV](https://osv.dev), per [renovate.json](renovate.json) | none: run it manually with `dryRun` to see what it would open |
 | [release.yaml](.github/workflows/release.yaml) | Publishes a `v*` tag: archives, SBOM, attestations and their Sigstore bundle, the Homebrew formula, the PyPI wheels | none: it publishes |
 
 `quality` and `security` are the checks that block a merge; `docs` is
-path-filtered on `docs/` outside `docs/adr/`, `assets/` and its own
-workflow, so it is never a required check. For the Windows code paths without a Windows host,
-`cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings`
-type-checks them.
+path-filtered on `docs/` outside `docs/adr/`, `assets/`, the mise and Task
+files and its own workflow, so it is never a required check. For the Windows
+code paths without a Windows host, `task lint:windows` runs clippy on them.
 
 The pipeline needs these secrets and variables:
 
@@ -257,7 +226,7 @@ external validators point at the file rather than at the binary. Changing the
 config types means regenerating it in the same commit:
 
 ```sh
-./scripts/generate-schema.sh
+task schema
 ```
 
 The `pollen-schema` pre-commit hook does this for you, and a test fails if
@@ -291,7 +260,7 @@ root.
 Preview while writing, at <http://localhost:4321/pollen/>:
 
 ```sh
-npm --prefix docs run dev
+task docs
 ```
 
 Build the current pages alone:
@@ -307,7 +276,7 @@ git fetch --tags
 ```
 
 ```sh
-npm --prefix docs run build:versions
+task docs:build
 ```
 
 ## Submitting a change
@@ -338,11 +307,11 @@ publish when the two disagree, so a hand-made tag fails loudly instead of
 shipping a mislabelled binary.
 
 ```sh
-./scripts/release.sh --dry-run 0.2.0
+task release -- --dry-run 0.2.0
 ```
 
 ```sh
-./scripts/release.sh 0.2.0
+task release -- 0.2.0
 ```
 
 The release notes are the GitHub release's, generated from the labels of the

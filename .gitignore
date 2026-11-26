@@ -5,3 +5,6 @@
 /pollen-py/python/pollen/*.so
 /pollen-py/python/pollen/*.pyd
 __pycache__/
+.env
+.task/
+mise.local.*

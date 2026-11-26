@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+set:
+  - errexit
+  - nounset
+  - pipefail
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Install the documentation site's dependencies and the git hooks
+    cmds:
+      - task: docs:install
+      - pre-commit install
+
+  lint:
+    desc: Run every pre-commit hook on the whole repository
+    cmds:
+      - pre-commit run --all-files {{.CLI_ARGS}}
+
+  lint:windows:
+    desc: Run clippy on the Windows code paths, from any host
+    cmds:
+      - rustup target add x86_64-pc-windows-msvc
+      - cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+
+  test:
+    desc: Run the Rust, Python and documentation site test suites
+    cmds:
+      - task: test:rust
+      - task: test:python
+      - task: test:docs
+
+  test:rust:
+    desc: Run the Rust test suite
+    cmds:
+      - cargo test --all-targets --locked {{.CLI_ARGS}}
+
+  test:python:
+    desc: Build the Python bindings and run their tests
+    dir: pollen-py
+    cmds:
+      - uv run --locked pytest {{.CLI_ARGS}}
+
+  test:docs:
+    desc: Run the documentation site's unit tests
+    cmds:
+      - npm --prefix docs test
+
+  test:litellm:
+    desc: Deploy skills from a LiteLLM proxy (needs Docker with Compose)
+    cmds:
+      - tests/litellm.sh
+
+  test:homebrew:
+    desc: Check the rendered Homebrew formula in a throwaway tap (needs Homebrew)
+    platforms:
+      - darwin
+    cmds:
+      - tests/homebrew-formula.sh
+
+  build:
+    desc: Build the pollen binary in release mode
+    cmds:
+      - cargo build --release --locked {{.CLI_ARGS}}
+
+  schema:
+    desc: Regenerate the config JSON Schema
+    cmds:
+      - scripts/generate-schema.sh
+
+  docs:
+    desc: Preview the documentation site at http://localhost:4321/pollen/
+    cmds:
+      - npm --prefix docs run dev
+
+  docs:install:
+    desc: Install the documentation site's dependencies
+    cmds:
+      - npm ci --prefix docs
+
+  docs:build:
+    desc: Build every version of the documentation site, as CI does (needs the tags)
+    cmds:
+      - npm --prefix docs run build:versions
+
+  release:
+    desc: Cut a release, e.g. task release -- 0.2.0 (scripts/release.sh)
+    cmds:
+      - scripts/release.sh {{.CLI_ARGS}}
