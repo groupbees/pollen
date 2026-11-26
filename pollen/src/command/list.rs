@@ -1,5 +1,3 @@
-//! `pollen list`: what is deployed in the target directories.
-
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -12,14 +10,11 @@ use crate::state::{InstalledSkill, State};
 /// The skills pollen manages in one target directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Deployed {
-    /// The target directory.
     pub target: PathBuf,
     /// Its managed skills, keyed by the name they are deployed under.
     pub skills: BTreeMap<String, InstalledSkill>,
 }
 
-/// Run the subcommand.
-///
 /// # Errors
 ///
 /// When the config or a target directory's state cannot be read.

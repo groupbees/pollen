@@ -1,6 +1,3 @@
-//! `pollen show`: list the skills a git source provides, before adding it to
-//! a config.
-
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -48,8 +45,6 @@ pub struct Entry {
     pub error: Option<String>,
 }
 
-/// Run the subcommand.
-///
 /// # Errors
 ///
 /// When the source cannot be fetched, the revision names nothing, or `path`

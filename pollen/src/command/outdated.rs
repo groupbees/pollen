@@ -1,6 +1,3 @@
-//! `pollen outdated`: which git sources have a newer release than the one
-//! they are pinned to, and which `well-known` skills a newer artifact.
-
 use std::fmt;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -25,7 +22,6 @@ pub enum Entry {
 }
 
 impl Entry {
-    /// Whether a newer release or artifact exists than the one pinned.
     #[must_use]
     pub fn is_outdated(&self) -> bool {
         match self {
@@ -48,9 +44,7 @@ impl fmt::Display for Entry {
 /// digest its index publishes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DigestStatus {
-    /// The origin of the source.
     pub origin: String,
-    /// The skill's name.
     pub skill: String,
     /// The `digest:` pinned in the config, `None` when the skill follows
     /// whatever the index publishes.
@@ -102,9 +96,7 @@ fn short_digest(digest: &str) -> &str {
 /// Where one git source stands against its remote's releases.
 #[derive(Debug, Clone)]
 pub struct Status {
-    /// The `repo:` value.
     pub repo: String,
-    /// The `revision:` value.
     pub revision: String,
     /// The release the revision stands for, when it is one.
     pub current: Option<RemoteTag>,
@@ -118,7 +110,6 @@ pub struct Status {
 /// A release newer than `latest`, left out for being too young.
 #[derive(Debug, Clone)]
 pub struct Pending {
-    /// The release.
     pub release: RemoteTag,
     /// How old it is, `None` when git records no date for its tag.
     pub age: Option<Duration>,
@@ -144,7 +135,6 @@ impl fmt::Display for Pending {
 }
 
 impl Status {
-    /// Whether a newer release exists than the one pinned.
     #[must_use]
     pub fn is_outdated(&self) -> bool {
         match (&self.current, &self.latest) {
@@ -195,8 +185,6 @@ fn short(revision: &str) -> String {
     }
 }
 
-/// Run the subcommand.
-///
 /// # Errors
 ///
 /// When the config cannot be loaded or a remote cannot be reached.

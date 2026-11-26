@@ -1,5 +1,3 @@
-//! The subcommand implementations.
-
 pub mod autoupdate;
 pub mod list;
 pub mod migrate;
@@ -19,9 +17,7 @@ use crate::source::Fetcher;
 
 /// Everything a subcommand needs, resolved from the CLI and the config file.
 pub struct Context {
-    /// The parsed configuration.
     pub config: Config,
-    /// The directories skills are deployed into.
     pub targets: Vec<PathBuf>,
 }
 
@@ -51,7 +47,6 @@ impl Context {
         Ok(Self { config, targets })
     }
 
-    /// The materializer the config's sources are fetched through.
     #[must_use]
     pub fn fetcher(&self, options: &Options) -> Fetcher {
         Fetcher::new(

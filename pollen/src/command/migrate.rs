@@ -1,6 +1,3 @@
-//! `pollen config migrate`: rewrite `pollen.yaml` in the newest format version, in
-//! place.
-
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
@@ -14,19 +11,14 @@ use crate::config::{self, Config, LATEST};
 /// What a migration changed, or would change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Migration {
-    /// The config file.
     pub path: PathBuf,
-    /// The format version the file was written in.
     pub from_version: u32,
-    /// The format version it is in after the migration.
     pub to_version: u32,
     /// Whether the file was rewritten: false on a dry run, or when it was
     /// already in the newest version.
     pub written: bool,
 }
 
-/// Run the subcommand.
-///
 /// # Errors
 ///
 /// See [`apply`].

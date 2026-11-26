@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from importlib.metadata import entry_points, version
@@ -42,3 +43,21 @@ def test_a_usage_error_exits_with_clap_status() -> None:
 
     assert result.returncode == 2
     assert "Usage: pollen" in result.stderr
+
+
+def test_a_log_filter_that_does_not_parse_exits_with_clap_status() -> None:
+    result = run_cli("schema", "--log-filter", "pollen=loud")
+
+    assert result.returncode == 2
+    assert "invalid log filter `pollen=loud`" in result.stderr
+
+
+def test_logs_can_be_json(workspace: Path, cache_dir: Path) -> None:
+    result = run_cli(
+        "update", "--cache-dir", str(cache_dir), "--log-filter", "info", "--log-format", "json"
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stderr.splitlines()
+    assert lines
+    assert all(json.loads(line)["level"] for line in lines)

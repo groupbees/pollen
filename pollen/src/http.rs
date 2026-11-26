@@ -59,7 +59,6 @@ struct Timeouts {
 /// A response body read whole, and what the server said it was.
 #[derive(Debug)]
 pub struct Download {
-    /// The body.
     pub bytes: Vec<u8>,
     /// The `Content-Type` header, without its parameters.
     pub content_type: Option<String>,

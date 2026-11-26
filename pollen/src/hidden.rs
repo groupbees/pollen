@@ -12,7 +12,6 @@ pub struct Hidden {
     pub line: usize,
     /// Position in the line, counted in characters, from 1.
     pub column: usize,
-    /// The character itself.
     pub character: char,
 }
 

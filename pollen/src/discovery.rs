@@ -1,5 +1,3 @@
-//! Finding skill directories inside a materialized source.
-
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};

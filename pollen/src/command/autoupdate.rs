@@ -1,6 +1,3 @@
-//! `pollen autoupdate`: move every git source to its newest release, and
-//! every pinned `well-known` skill to its published digest, in place.
-
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -18,11 +15,8 @@ use crate::version::Version;
 /// One `revision:` to rewrite.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bump {
-    /// The `repo:` value of the entry.
     pub repo: String,
-    /// The `revision:` value it holds now.
     pub from: String,
-    /// The value to write.
     pub to: String,
     /// The release `to` stands for, written as a trailing comment when `to`
     /// is a commit id.
@@ -32,9 +26,7 @@ pub struct Bump {
 /// One `digest:` of a skill listed under a `well-known` source to write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DigestBump {
-    /// The origin of the entry.
     pub origin: String,
-    /// The skill's name.
     pub skill: String,
     /// The `digest:` it holds now, `None` when it has none.
     pub from: Option<String>,
@@ -45,7 +37,6 @@ pub struct DigestBump {
 /// What an autoupdate changed, or would change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome {
-    /// The config file.
     pub path: PathBuf,
     /// One entry per git source moved, empty when every one is up to date.
     pub bumps: Vec<Bump>,
@@ -55,8 +46,6 @@ pub struct Outcome {
     pub written: bool,
 }
 
-/// Run the subcommand.
-///
 /// # Errors
 ///
 /// When the config cannot be loaded, a remote cannot be reached, or the

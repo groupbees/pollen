@@ -66,6 +66,7 @@ def test_clients_override_the_config(workspace: Path, cache_dir: Path) -> None:
 
 def test_rejects_an_unknown_client_and_clients_with_targets(cache_dir: Path) -> None:
     with pytest.raises(ValueError, match="cursor"):
+        # The invalid client is the point: the stubs rightly reject it.
         pollen.update(cache_dir=cache_dir, clients=["cursor"])  # pyright: ignore[reportArgumentType]
     with pytest.raises(ValueError, match="mutually exclusive"):
         pollen.update(cache_dir=cache_dir, targets=["skills"], clients=["claude"])
