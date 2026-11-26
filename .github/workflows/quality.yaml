@@ -74,11 +74,61 @@ jobs:
       - name: run the test suite
         run: cargo test --all-targets --locked
 
+  # GitHub Free runs 5 macOS jobs at a time across the whole organisation, so
+  # a pull request builds the release binaries only when their inputs change.
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      binaries: ${{ github.event_name != 'pull_request' || steps.filter.outputs.binaries == 'true' }}
+    steps:
+      - name: list the changed paths
+        id: filter
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        with:
+          filters: |
+            binaries:
+              - pollen/**
+              - Cargo.toml
+              - Cargo.lock
+              - rust-toolchain.toml
+              - .cargo/**
+              - .github/workflows/binaries.yaml
+              - .github/workflows/quality.yaml
+
   # The release builds, so a target that stops building fails here rather
   # than on the tag.
   binaries:
     name: binaries
+    needs:
+      - changes
+    if: ${{ needs.changes.outputs.binaries == 'true' }}
     uses: ./.github/workflows/binaries.yaml
+
+  # The required check for the release builds: a skipped matrix of a called
+  # workflow never reports its per-target checks, so the ruleset waits on this
+  # job instead.
+  binaries-result:
+    name: binaries result
+    needs:
+      - changes
+      - binaries
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: fail when a release build failed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          BINARIES: ${{ needs.binaries.result }}
+        run: |
+          if [ "$CHANGES" != success ] || { [ "$BINARIES" != success ] && [ "$BINARIES" != skipped ]; }; then
+            echo "changes: ${CHANGES}, binaries: ${BINARIES}" >&2
+            exit 1
+          fi
 
   python:
     name: python (${{ matrix.runner }}, ${{ matrix.python }})
@@ -133,12 +183,16 @@ jobs:
 
   homebrew-formula:
     name: homebrew formula
-    runs-on: macos-15
+    # brew style and brew audit need no macOS, and macOS runners are scarce.
+    runs-on: ubuntu-24.04
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: put the runner's Homebrew on PATH
+        run: echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
 
       - name: check the rendered formula
         run: tests/homebrew-formula.sh
