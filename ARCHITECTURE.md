@@ -14,19 +14,19 @@ Python package, which calls it in-process.
 
 ```mermaid
 flowchart LR
-    yaml[pollen.yaml] -->|parse + validate| config[config]
-    config -->|per repo| source[source]
-    source -->|git clone/fetch, sync| cache[(cache)]
-    source -->|index + artifacts over HTTPS| origin[(well-known origin)]
-    credentials[(credentials file)] -->|bearer token per origin| source
-    source -->|root directory| discovery[discovery]
-    source -->|skill directories, well-known| skill[skill]
-    discovery -->|candidate dirs| skill
-    skill -->|validated frontmatter| plan[plan]
-    plan -->|desired set| update[update]
-    state[(state file, one per target)] -->|owned skills| update
-    update -->|copy + rename, per target| target[(.claude/skills, .agents/skills)]
-    update -->|rewrite| state
+    yaml["pollen.yaml"] -->|"parse + validate"| config["config"]
+    config -->|"per source"| source["source"]
+    source -->|"git clone/fetch, sync"| cache[("cache")]
+    source -->|"index + artifacts over HTTPS"| origin[("well-known origin")]
+    credentials[("credentials file")] -->|"bearer token per origin"| source
+    source -->|"root directory"| discovery["discovery"]
+    source -->|"skill directories, well-known"| skill["skill"]
+    discovery -->|"candidate dirs"| skill
+    skill -->|"validated frontmatter"| plan["plan"]
+    plan -->|"desired set"| update["update"]
+    state[("state file, one per target")] -->|"owned skills"| update
+    update -->|"copy + rename, per target"| target[(".claude/skills, .agents/skills")]
+    update -->|"rewrite"| state
 ```
 
 ## Components
@@ -53,10 +53,10 @@ to a module under [pollen/src/](pollen/src/), except the last.
   in the home directory with `--global`, which also reads the user-level
   config; duplicates are dropped. It knows nothing about
   git or the filesystem beyond reading its own file.
-- **[source](pollen/src/source.rs)** — turns one `repos:` entry into a directory on
-  disk, behind the `Materializer` trait. `local` resolves to the config
-  file's own directory; a git source goes through
-  [source/git](pollen/src/source/git.rs), which keeps one checkout per `(url,
+- **[source](pollen/src/source.rs)** — turns one source, an entry of `repos`
+  or of `discovery`, into a directory on disk, behind the `Materializer`
+  trait. `local` resolves to the config file's own directory; a git source
+  goes through [source/git](pollen/src/source/git.rs), which keeps one checkout per `(url,
   revision)` pair under the cache and shells out to `git`. It resolves the
   revision to a commit and refuses to guess when it cannot. A `well-known`
   source goes through [source/well_known](pollen/src/source/well_known.rs),
@@ -75,9 +75,9 @@ to a module under [pollen/src/](pollen/src/), except the last.
   helper command the file names, at most once per run, or by reading the
   variable it names. It knows nothing about HTTP.
 - **[discovery](pollen/src/discovery.rs)** — walks a materialized source and answers
-  which directories a `paths:` entry selects. A directory holding a `SKILL.md`
-  is a skill and is never descended into, so a skill that bundles reference
-  material does not spawn phantom children.
+  which directories each `path` of a repo's `skills` selects. A directory
+  holding a `SKILL.md` is a skill and is never descended into, so a skill
+  that bundles reference material does not spawn phantom children.
 - **[schema](pollen/src/schema.rs)** — derives the JSON Schema for `pollen.yaml`
   from the same types [config/raw](pollen/src/config/raw.rs) deserialises, so the published
   schema cannot describe a file the parser would reject. One document covers
@@ -131,7 +131,7 @@ to a module under [pollen/src/](pollen/src/), except the last.
 ## Data flow
 
 **An update.** The config is parsed and validated up front, so a typo never
-half-applies. Each `repos:` entry is then materialized in order; a git source
+half-applies. Each source is then materialized in order; a git source
 fetches its revision, falling back from a single-revision shallow fetch to a
 full one, and resolves it to a commit; a `well-known` source fetches its
 index, and downloads the artifacts of the skills it selects that the cache
@@ -319,7 +319,6 @@ digest. A second file would only repeat the config, and could disagree with it.
 
 - The library never writes to stdout. Only the subcommands' `run` functions
   print, so the Python bindings and any other caller get data, never text.
-
 - Every target directory holds a full, independent copy of the deployed set.
   No target is derived from another, and none is a link into another.
 - A skill's frontmatter `name` equals its directory name, and that name is
@@ -332,7 +331,7 @@ digest. A second file would only repeat the config, and could disagree with it.
   skills; `update` refuses a target whose recorded config still exists, and
   `--force` hands the directory over. A recorded config that is gone (the
   project moved) is not an owner any more and is replaced silently.
-- A `paths:` entry never resolves outside its source root, before or after
+- A repo's `path` never resolves outside its source root, before or after
   symlink resolution. Each selected skill directory has the same containment
   check, including child directory symlinks. Excluded candidates are not selected.
 - Managed state keys follow the same name rules as authored skills. Unsafe

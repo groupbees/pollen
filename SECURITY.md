@@ -12,10 +12,10 @@ Include the version (`pollen --version`), the operating system, a
 
 ## Supported versions
 
-pollen is a 0.x project: only the latest release receives security fixes. It
-is published as GitHub Releases archives, as the `pollen-skills` package on
-PyPI and through the `groupbees/tap` Homebrew tap, all built from the same
-`v*` tag.
+Fixes ship in a new release, and only the latest release receives security
+fixes. pollen is published as GitHub Releases archives, as the
+`pollen-skills` package on PyPI and through the `groupbees/tap` Homebrew tap,
+all built from the same `v*` tag.
 
 ## Scope
 
@@ -32,14 +32,23 @@ In scope, because they are where pollen handles untrusted input or secrets:
   recorded in `.pollen.json`;
 - resolving a revision to a commit other than the one asked for.
 
-Out of scope: the content of a skill you chose to deploy, a malicious
-`pollen.yaml` you chose to run (it names sources and paths, never commands),
-and vulnerabilities in a dependency with no way to reach them through pollen
-(report those upstream).
+Out of scope:
+
+- the content of a skill you chose to deploy;
+- a malicious `pollen.yaml` you chose to run: it names sources and paths,
+  never commands;
+- a vulnerability in a dependency with no way to reach it through pollen:
+  report it upstream;
+- a finding that needs an already-compromised host or account;
+- scanner output with no path to exploitation.
 
 ## What happens next
 
-You get an acknowledgement within a few days. The report is confirmed or
-declined with reasons, a fix is prepared in a private fork, and the fix ships
-in a release published with a GitHub security advisory that credits the
-reporter unless they prefer not to be named.
+1. You get an acknowledgement within a few days.
+2. The report is confirmed or declined with reasons.
+3. A fix is prepared in the advisory's private fork.
+4. The fix ships in a release whose notes cite the advisory's GHSA identifier,
+   and its CVE when there is one.
+5. The GitHub security advisory is published, with a CVE requested through
+   GitHub when the impact warrants one, and credits the reporter unless they
+   prefer not to be named.
