@@ -8,17 +8,12 @@
 # file in the newest version.
 version: 2
 
-# The clients the skills are deployed for, each through its own skill
-# directory: `claude` (.claude/skills, what Claude Code reads) and
-# `agent-skills` (.agents/skills, the cross-client convention every other
-# Agent Skills client scans). Under the home directory with --global.
-# Default: all.
+# The clients an entry naming neither `clients` nor `targets` deploys for:
+# `claude-code` (skills in .claude/skills) and `opencode` (skills in
+# .agents/skills, the cross-client convention most other Agent Skills clients
+# scan too). Under the home directory with --global. Default: all, every
+# client this pollen knows.
 clients: all
-
-# Or directories of your own instead of `clients`; each gets a full copy. A
-# relative path resolves against the working directory, and `~` is expanded.
-# targets:
-#   - ~/team/skills
 
 repos:
   # A git repository, pinned to a tag, a branch or a commit.
@@ -30,6 +25,11 @@ repos:
       - path: mydir/
         recurse: true  # default: false, i.e. immediate children only
         exclude: ^toto  # default: none
+        # The clients these skills are deployed for, one or a list, in place
+        # of the top-level `clients`. Not with `targets`.
+        clients:
+          - claude-code
+          - opencode
 
   # A plugin repository: its skills sit under `<plugin>/skills/`, which
   # `recurse: true` finds without naming each plugin.
@@ -43,6 +43,11 @@ repos:
   - repo: local
     skills:
       - path: skills
+        # Directories of your own, in place of any client's skill directory;
+        # each gets a full copy. A relative path resolves against the working
+        # directory, and `~` is expanded. Not with `clients`.
+        targets:
+          - ~/team/skills
 
 # Origins serving an Agent Skills discovery index,
 # /.well-known/agent-skills/index.json. A file needs `repos`, `discovery`, or
@@ -51,6 +56,7 @@ discovery:
   # Every skill the index lists, except the ones whose name matches `exclude`.
   - url: https://skills.example.org  # an origin: no path
     exclude: ^experimental-  # default: none
+    clients: opencode  # or `targets`, as on a `skills` item
 
   # Only the listed skills. A `digest` pins the artifact;
   # `pollen autoupdate --freeze` writes it. Tokens for an origin go in

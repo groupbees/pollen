@@ -186,7 +186,12 @@ mod tests {
 
     #[test]
     fn accepts_clients() {
-        for clients in ["all", "claude", "[claude]", "[claude, agent-skills]"] {
+        for clients in [
+            "all",
+            "claude-code",
+            "[claude-code]",
+            "[claude-code, opencode]",
+        ] {
             let config = yaml(&format!(
                 "version: 2\nclients: {clients}\nrepos:\n  - repo: local\n    skills:\n      - path: .\n"
             ));
@@ -196,12 +201,43 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_clients_clients_with_targets_and_clients_in_version_one() {
+    fn accepts_a_destination_on_each_entry() {
+        for config in [
+            "repos:\n  - repo: local\n    skills:\n      - path: .\n        clients: claude-code\n",
+            "repos:\n  - repo: local\n    skills:\n      - path: .\n        clients: [opencode, claude-code]\n",
+            "repos:\n  - repo: local\n    skills:\n      - path: .\n        targets: [out]\n",
+            "discovery:\n  - url: https://x.example\n    clients: all\n",
+            "discovery:\n  - url: https://x.example\n    targets: [out]\n",
+        ] {
+            assert!(
+                validator().is_valid(&yaml(&format!("version: 2\n{config}"))),
+                "{config}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_clients_with_targets_and_destinations_outside_version_two_entries() {
+        for config in [
+            "version: 2\nrepos:\n  - repo: local\n    skills:\n      - path: .\n        clients: all\n        targets: [out]\n",
+            "version: 2\ndiscovery:\n  - url: https://x.example\n    clients: all\n    targets: [out]\n",
+            "version: 2\nrepos:\n  - repo: local\n    skills:\n      - path: .\n        targets: []\n",
+            "version: 2\ntargets: [out]\nrepos:\n  - repo: local\n    skills:\n      - path: .\n",
+            "repos:\n  - repo: local\n    paths:\n      - path: .\n        targets: [out]\n",
+            "repos:\n  - well-known: https://x.example\n    clients: all\n",
+        ] {
+            assert!(!validator().is_valid(&yaml(config)), "{config}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_clients_and_clients_in_version_one() {
         for prefix in [
             "clients: []\n",
             "clients: cursor\n",
             "clients: [cursor]\n",
-            "clients: all\ntargets: [skills]\n",
+            "clients: claude\n",
+            "clients: agent-skills\n",
         ] {
             let config = yaml(&format!(
                 "version: 2\n{prefix}repos:\n  - repo: local\n    skills:\n      - path: .\n"
@@ -209,7 +245,8 @@ mod tests {
 
             assert!(!validator().is_valid(&config), "{prefix}");
         }
-        let v1 = yaml("clients: claude\nrepos:\n  - repo: local\n    paths:\n      - path: .\n");
+        let v1 =
+            yaml("clients: claude-code\nrepos:\n  - repo: local\n    paths:\n      - path: .\n");
         assert!(!validator().is_valid(&v1));
     }
 

@@ -60,7 +60,7 @@ pub async fn run(
 }
 
 /// Check the config file at `path`, and unless `config_only` every skill its
-/// sources select.
+/// sources select and the plan of each directory they go to.
 ///
 /// An invalid skill lands in `problems` rather than
 /// failing the check, so every one of them is reported.
@@ -69,7 +69,8 @@ pub async fn run(
 ///
 /// When the file is invalid, `pinned` is set and a git source is not pinned
 /// to a commit or a `well-known` one does not list every skill with its
-/// digest, or a source cannot be fetched.
+/// digest, a source cannot be fetched, or two sources send the same skill
+/// name to one directory.
 pub async fn check(
     options: &Options,
     path: &Path,
@@ -107,6 +108,7 @@ pub async fn check(
 
     let plan = plan::build(
         &context.config,
+        &context.scope,
         &context.fetcher(options),
         allow_hidden_characters,
     )

@@ -132,12 +132,15 @@ Print the JSON Schema for the config file:
 pollen schema
 ```
 
-Deploy somewhere else, for this run only — into directories of your own, or
-for some clients only, whatever the config's `targets` and `clients` say:
+Deploy somewhere else for this run only, into directories of your own in
+place of every entry's `clients` or `targets`, or for some clients only:
+`--client` deploys what the config sends to those clients and nothing else,
+so an entry sent to other clients or to `targets` is left out. Such a run
+visits no other directory, so it prunes nothing elsewhere:
 
 ```sh
 pollen update --target ~/.claude/skills --target ~/.agents/skills
-pollen update --client claude
+pollen update --client claude-code
 ```
 
 Deploy the skills you want in every project, from your user-level config:
@@ -148,9 +151,9 @@ pollen update --global
 
 `--global` (`-g`) reads `$XDG_CONFIG_HOME/pollen/pollen.yaml` —
 `~/.config/pollen/pollen.yaml` when the variable is unset, on macOS too, and
-`%APPDATA%\pollen\pollen.yaml` on Windows — and, when that file sets no
-`targets`, deploys into its `clients`' skill directories under the home
-directory: `~/.claude/skills` and `~/.agents/skills` by default. It works
+`%APPDATA%\pollen\pollen.yaml` on Windows — and takes the skill directories
+of its clients under the home directory, so an entry naming no `targets`
+deploys into `~/.claude/skills` and `~/.agents/skills` by default. It works
 with every command (`pollen list -g`, `pollen validate -g`) and cannot be
 combined with `--config`.
 

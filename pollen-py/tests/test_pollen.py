@@ -57,11 +57,17 @@ def test_targets_override_the_config(workspace: Path, tmp_path: Path, cache_dir:
     assert (elsewhere / "gamma" / "SKILL.md").is_file()
 
 
-def test_clients_override_the_config(workspace: Path, cache_dir: Path) -> None:
-    report = pollen.update(cache_dir=cache_dir, clients=["agent-skills"])
+def test_clients_keep_only_what_the_config_sends_them(workspace: Path, cache_dir: Path) -> None:
+    assert pollen.update(cache_dir=cache_dir, clients=["opencode"]).summaries == []
+
+    (workspace / "pollen.yaml").write_text(
+        "version: 2\nrepos:\n  - repo: local\n    skills:\n      - path: local-skills\n"
+    )
+    report = pollen.update(cache_dir=cache_dir, clients=["opencode"])
 
     assert [summary.target for summary in report.summaries] == [Path(".agents/skills")]
     assert (workspace / ".agents" / "skills" / "gamma" / "SKILL.md").is_file()
+    assert not (workspace / ".claude").exists()
 
 
 def test_rejects_an_unknown_client_and_clients_with_targets(cache_dir: Path) -> None:
@@ -69,7 +75,7 @@ def test_rejects_an_unknown_client_and_clients_with_targets(cache_dir: Path) -> 
         # The invalid client is the point: the stubs rightly reject it.
         pollen.update(cache_dir=cache_dir, clients=["cursor"])  # pyright: ignore[reportArgumentType]
     with pytest.raises(ValueError, match="mutually exclusive"):
-        pollen.update(cache_dir=cache_dir, targets=["skills"], clients=["claude"])
+        pollen.update(cache_dir=cache_dir, targets=["skills"], clients=["claude-code"])
 
 
 def test_list_installed_reads_what_update_recorded(workspace: Path, cache_dir: Path) -> None:

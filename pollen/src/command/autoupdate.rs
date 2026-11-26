@@ -120,6 +120,7 @@ pub async fn apply(
             if let Repo::WellKnown {
                 origin,
                 skills: IndexSelection::All { .. },
+                ..
             } = repo
             {
                 tracing::warn!(

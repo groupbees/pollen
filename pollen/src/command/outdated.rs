@@ -244,7 +244,7 @@ pub async fn check(
     for repo in &config.repos {
         let (url, revision) = match repo {
             Repo::Git { url, revision, .. } => (url.clone(), revision.clone()),
-            Repo::WellKnown { origin, skills } => {
+            Repo::WellKnown { origin, skills, .. } => {
                 let digests = digests(&well_known, skills, origin, min_age.is_some()).await?;
                 statuses.extend(digests.into_iter().map(Entry::Digest));
                 continue;

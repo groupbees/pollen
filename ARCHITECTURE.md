@@ -4,10 +4,10 @@
 
 `pollen` is a one-shot CLI. A run reads `pollen.yaml`, makes every source
 it declares available on the local filesystem, works out which skill
-directories those sources select, and then makes each target directory match
-that set — installing, replacing and removing as needed. The sources are
-fetched and validated once and applied to every target, so deploying to two
-directories costs one fetch. Nothing runs in the background, and nothing is
+directories those sources select and where each entry sends them, and then
+makes each directory match what is planned for it — installing, replacing and
+removing as needed. The sources are fetched and validated once and applied to
+every directory, so deploying to two directories costs one fetch. Nothing runs in the background, and nothing is
 left behind between runs except a cache and one state file per target.
 The same engine runs behind the `pollen` binary and behind the `pollen`
 Python package, which calls it in-process.
@@ -23,7 +23,7 @@ flowchart LR
     source -->|"skill directories, well-known"| skill["skill"]
     discovery -->|"candidate dirs"| skill
     skill -->|"validated frontmatter"| plan["plan"]
-    plan -->|"desired set"| update["update"]
+    plan -->|"desired set, per directory"| update["update"]
     state[("state file, one per target")] -->|"owned skills"| update
     update -->|"copy + rename, per target"| target[(".claude/skills, .agents/skills")]
     update -->|"rewrite"| state
@@ -46,13 +46,17 @@ to a module under [pollen/src/](pollen/src/), except the last.
   `digest` is a lowercase SHA-256. A validated file is converted, an older
   version through each newer one, into the model every command reads:
   `Config` and the `Repo` enum (`Local`, `Git`, `WellKnown`), where a key
-  that does not belong to its kind of source cannot be represented. It
-  resolves the target directories from the CLI's `--target`, else its
-  `--client`, else the config's `targets`, else the skill directory of each
-  of its `clients` — all of them by default — in the working directory, or
-  in the home directory with `--global`, which also reads the user-level
-  config; duplicates are dropped. It knows nothing about
-  git or the filesystem beyond reading its own file.
+  that does not belong to its kind of source cannot be represented. Each
+  selection — an item of a `repo`'s `skills`, a discovery origin — carries
+  its `Destination`: the entry's `targets`, its `clients`, or the default,
+  the config's top-level `clients`, all of them when it names none. A
+  `Scope` holds what a run adds: the CLI's `--target`, which replaces every
+  entry's destination, or its `--client`, which keeps only the entries'
+  clients among those it names, and where client skill directories
+  sit, the working directory, or the home directory with `--global`, which
+  also reads the user-level config. Resolving a destination in a scope gives
+  its directories, duplicates dropped. It knows nothing about git or the
+  filesystem beyond reading its own file.
 - **[source](pollen/src/source.rs)** — turns one source, an entry of `repos`
   or of `discovery`, into a directory on disk, behind the `Materializer`
   trait. `local` resolves to the config file's own directory; a git source
@@ -137,21 +141,29 @@ full one, and resolves it to a commit; a `well-known` source fetches its
 index, and downloads the artifacts of the skills it selects that the cache
 does not hold yet. Discovery lists the candidate directories of a git or
 `local` source, `skill` validates each, and the results accumulate into a plan
-keyed by skill name — two sources providing one name is an error, not a
-last-one-wins.
+keyed by destination directory and skill name, each skill planned for every
+directory its entry's destination resolves to. Two sources sending one name
+to the same directory is an error, not a last-one-wins; one name in two
+directories is not.
 
-Only then does anything get written, and the same plan is then applied to each
-target in turn. For each planned skill: a directory that exists but is not in
-that target's state file is refused (it is someone's own work); otherwise the
-source fingerprint is compared with both the state record and the installed
-tree, and a match makes the skill unchanged. Anything else is staged and
-renamed into place. Finally, every state entry the config no longer selects
-has its directory removed, and the state file is rewritten.
+Only then does anything get written. The directories visited are those the
+entries resolve to, in the order they are first named, and, unless the CLI
+replaces every destination, each known client skill directory in scope whose
+state file names this config, so a dropped client or an entry moved to
+`targets` leaves nothing behind there. A directory nothing is planned for is
+left alone unless it has a state file. In each directory, for each skill
+planned there: a directory that exists but is not in that state file is
+refused (it is someone's own work); otherwise the source fingerprint is
+compared with both the state record and the installed tree, and a match makes
+the skill unchanged. Anything else is staged and renamed into place. Finally,
+every state entry not planned there has its directory removed, and the state
+file is rewritten — or, when nothing is left, removed along with the
+directory if it is empty.
 
 **A failure part-way through.** Skills installed before the failure stay
 installed and stay recorded, in the targets already processed as well as the
 one that failed — the run is not a transaction, and does not pretend to be.
-What cannot happen is a partially copied skill in a target:
+What cannot happen is a partially copied skill in a directory:
 the rename is the only step that makes an install visible. A run killed
 between the copy and the rename leaves a `.pollen-staging-*` directory,
 which the next run sweeps.
@@ -169,9 +181,11 @@ Two stores, both disposable.
   works from, and each unpacked artifact, keyed by its digest, which is what
   lets an unchanged skill skip the download. Deleting the cache costs a
   refetch and nothing else.
-- **The state file**, `.pollen.json` inside each target directory, mapping
-  each installed skill name to its source, revision, resolved commit or
-  artifact digest, and tree fingerprint, and naming the config file that owns the directory. It lives
+- **The state file**, `.pollen.json` inside each directory pollen deploys
+  into, mapping each installed skill name to its source, revision, resolved
+  commit or artifact digest, and tree fingerprint, and naming the config file
+  that owns the directory, which is how a run finds the client directories it
+  must prune. A directory left with nothing installed has none. It lives
   with what it describes rather than next to the config,
   because the config is shared and version-controlled while what is on disk is
   a property of this machine. Deleting it makes `pollen` forget it owns
@@ -197,9 +211,28 @@ rather than one vendor's plugin mechanism. Generating a plugin marketplace
 instead would buy namespacing and versioning, and would leave every
 non-Claude client unserved by a tool whose whole premise is a shared format.
 
+**Clients are rows of a table.** A client is named as the product names
+itself (`claude-code`, `opencode`), never after a directory convention, and
+what pollen knows about it is data: its skill directory. There is no adapter
+trait and no client defined in `pollen.yaml`. A client the table does not
+list is served through the directory it reads, `.agents/skills/` for most,
+or through `targets` on an entry.
+See [ADR 0004](docs/adr/0004-deploy-agent-definitions-verbatim-per-client.md).
+
+**Each entry names its destination.** An item of a `repo`'s `skills` and a
+discovery origin take `clients` or `targets`, never both, and fall back on
+the top-level `clients`. A top-level `targets` beside `clients` would make
+two keys each decide half of every destination; on the entry, what it says is
+where its skills go. Because the config is the only record of where skills
+belong, a run also visits the known client directories whose state file
+names it, so dropping a client prunes its directory instead of leaving
+skills the config does not declare. A directory that only `targets` named
+cannot be found that way, and keeps its skills.
+
 **Two target directories by default, both full copies.** Clients scan their
 own directory plus `.agents/skills/`, and no single path reaches all of them,
-so the default writes `.claude/skills/` and `.agents/skills/` rather than
+so the default, every client pollen knows, writes `.claude/skills/` for
+Claude Code and `.agents/skills/` for OpenCode and the others rather than
 asking the user which agent they use. Copies rather than symlinks, because a
 symlink only works where the client resolves one and the two targets need not
 share an ancestor. Detecting which agents are installed and targeting those
@@ -303,8 +336,9 @@ need an alias kept forever. The version moves only on a renamed or removed
 key or a change of meaning, never for a new optional key. An old version is
 deprecated, with a warning pointing to `pollen config migrate`, only in a
 later release than its successor's, and dropped later still. `config
-migrate` edits the file line by line like `autoupdate`, and writes it only if
-it loads to the same sources and targets. See
+migrate` edits the file line by line like `autoupdate`, copying a version 1
+`targets` onto every entry, and writes it only if it loads to the same
+sources and destinations. See
 [ADR 0003](docs/adr/0003-version-the-config-format.md).
 
 **No lockfile.** A lockfile exists to freeze what a resolver chose: version
@@ -319,8 +353,8 @@ digest. A second file would only repeat the config, and could disagree with it.
 
 - The library never writes to stdout. Only the subcommands' `run` functions
   print, so the Python bindings and any other caller get data, never text.
-- Every target directory holds a full, independent copy of the deployed set.
-  No target is derived from another, and none is a link into another.
+- Each directory holds a full, independent copy of what is planned for it.
+  None is derived from another, and none is a link into another.
 - A skill's frontmatter `name` equals its directory name, and that name is
   what it deploys under. The specification requires the first; `pollen`
   enforces it rather than renaming around it.
@@ -331,6 +365,9 @@ digest. A second file would only repeat the config, and could disagree with it.
   skills; `update` refuses a target whose recorded config still exists, and
   `--force` hands the directory over. A recorded config that is gone (the
   project moved) is not an owner any more and is replaced silently.
+- A run modifies a directory none of its entries names only when it is a
+  known client skill directory whose state file names that config, and never
+  in a run with `--target` or `--client`.
 - A repo's `path` never resolves outside its source root, before or after
   symlink resolution. Each selected skill directory has the same containment
   check, including child directory symlinks. Excluded candidates are not selected.
@@ -356,9 +393,12 @@ digest. A second file would only repeat the config, and could disagree with it.
 
 ## Limitations
 
-- Deployment is not transactional, across skills or across targets. A failure
-  after the third of five skills, in the second of two targets, leaves the
-  first target complete and the second partly done.
+- Deployment is not transactional, across skills or across directories. A
+  failure after the third of five skills, in the second of two directories,
+  leaves the first complete and the second partly done.
+- A directory that only an entry's `targets` named keeps what pollen
+  deployed there once no entry names it: pollen visits the client
+  directories, not every directory a past config named.
 - Deploying to several targets duplicates every skill on disk. Skills are
   small, but a client that scans both `.claude/skills/` and `.agents/skills/`
   sees each skill twice and shadows one, logging a warning.

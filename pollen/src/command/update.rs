@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 
 use crate::cli::Options;
-use crate::command::Context;
 use crate::command::plan::{self, Planned};
-use crate::config::Config;
+use crate::command::{Context, directories};
+use crate::config::{Config, Scope};
 use crate::deploy;
 use crate::source::Materializer;
 use crate::state::{InstalledSkill, State};
@@ -120,10 +120,10 @@ impl fmt::Display for Summary {
     }
 }
 
-/// What one update did, across every target directory.
+/// What one update did, across every directory it visited.
 #[derive(Debug)]
 pub struct Report {
-    /// One summary per target, in the order the targets were resolved.
+    /// One summary per directory visited, in the order they were resolved.
     pub summaries: Vec<Summary>,
 }
 
@@ -165,7 +165,7 @@ pub async fn run(
     Ok(())
 }
 
-/// Load the config `options` name and update every target it resolves to.
+/// Load the config `options` name and update every directory it deploys into.
 ///
 /// # Errors
 ///
@@ -180,7 +180,7 @@ pub async fn report(
     let fetcher = context.fetcher(options);
     update(
         &context.config,
-        &context.targets,
+        &context.scope,
         &fetcher,
         dry_run,
         force,
@@ -189,24 +189,28 @@ pub async fn report(
     .await
 }
 
-/// Bring every directory in `targets` in line with `config`.
+/// Bring every directory `config` deploys into in `scope` in line with it,
+/// and prune the known client directories it owns but sends nothing to.
 ///
-/// The sources are fetched and validated once, then applied to each target.
+/// The sources are fetched and validated once, then applied to each
+/// directory. A directory nothing is planned for is left alone unless it has
+/// a state file; once pruned, its state file goes, and the directory too
+/// when it is empty.
 ///
 /// # Errors
 ///
 /// When a source cannot be fetched, a selected skill is invalid, two sources
-/// provide the same name, or a target holds an unmanaged directory of that
-/// name and `force` is not set.
+/// send the same name to one directory, or a directory holds an unmanaged
+/// directory of that name and `force` is not set.
 pub async fn update(
     config: &Config,
-    targets: &[PathBuf],
+    scope: &Scope,
     materializer: &impl Materializer,
     dry_run: bool,
     force: bool,
     allow_hidden_characters: bool,
 ) -> Result<Report> {
-    let plan = plan::build(config, materializer, allow_hidden_characters).await?;
+    let plan = plan::build(config, scope, materializer, allow_hidden_characters).await?;
     if !plan.problems.is_empty() {
         for problem in &plan.problems {
             tracing::error!("{problem}");
@@ -214,9 +218,14 @@ pub async fn update(
         bail!("{} skill(s) are invalid", plan.problems.len());
     }
 
-    let mut summaries = Vec::with_capacity(targets.len());
-    for target in targets {
-        summaries.push(apply(&plan.skills, &config.file, target, dry_run, force)?);
+    let mut summaries = Vec::new();
+    for dir in directories(config, scope) {
+        let skills = plan.skills_for(&dir);
+        if skills.is_empty() && !State::path(&dir).is_file() {
+            tracing::debug!(target = %dir.display(), "nothing planned, nothing to prune");
+            continue;
+        }
+        summaries.push(apply(skills, &config.file, &dir, dry_run, force)?);
     }
     Ok(Report { summaries })
 }
@@ -246,11 +255,18 @@ fn apply(
     // and an unrecorded one would be refused as unmanaged by the next run.
     // When both fail, the reconcile error is the one returned, and the save
     // error is logged rather than lost.
-    if !dry_run && let Err(error) = state.save(target) {
-        if reconciled.is_ok() {
-            return Err(error);
+    if !dry_run {
+        let written = if state.skills.is_empty() && skills.is_empty() {
+            forget(target)
+        } else {
+            state.save(target)
+        };
+        if let Err(error) = written {
+            if reconciled.is_ok() {
+                return Err(error);
+            }
+            tracing::error!("{error:#}");
         }
-        tracing::error!("{error:#}");
     }
     reconciled?;
 
@@ -259,6 +275,26 @@ fn apply(
         changes,
         dry_run,
     })
+}
+
+/// Remove the state file of a directory pollen deploys nothing into, then
+/// the directory itself when nothing else is left in it.
+fn forget(target: &Path) -> Result<()> {
+    let path = State::path(target);
+    if path.is_file() {
+        tracing::info!(path = %path.display(), "removing");
+        std::fs::remove_file(&path).with_context(|| format!("cannot remove {}", path.display()))?;
+    }
+    let empty = std::fs::read_dir(target)
+        .with_context(|| format!("cannot read {}", target.display()))?
+        .next()
+        .is_none();
+    if empty {
+        tracing::info!(path = %target.display(), "removing the empty directory");
+        std::fs::remove_dir(target)
+            .with_context(|| format!("cannot remove {}", target.display()))?;
+    }
+    Ok(())
 }
 
 /// Refuse a target another config still manages, unless `force` hands it over.
@@ -386,7 +422,7 @@ fn install(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{PathSpec, Repo};
+    use crate::config::{Client, Destination, PathSpec, Repo, Selection};
     use crate::source::{Materialized, MockMaterializer};
     use crate::state::State;
 
@@ -403,16 +439,18 @@ mod tests {
     fn config_with(repo_count: usize) -> Config {
         Config {
             version: 2,
-            targets: None,
             clients: None,
             repos: (0..repo_count)
                 .map(|index| Repo::Git {
                     url: format!("https://example.invalid/{index}.git"),
                     revision: "1.0.0".to_owned(),
-                    paths: vec![PathSpec {
-                        path: PathBuf::from("skills"),
-                        recurse: false,
-                        exclude: None,
+                    paths: vec![Selection {
+                        spec: PathSpec {
+                            path: PathBuf::from("skills"),
+                            recurse: false,
+                            exclude: None,
+                        },
+                        destination: Destination::Default,
                     }],
                 })
                 .collect(),
@@ -435,8 +473,25 @@ mod tests {
         mock
     }
 
-    fn one(target: &Path) -> Vec<PathBuf> {
-        vec![target.to_path_buf()]
+    /// A run with `--target` set to `dirs`.
+    fn targets(dirs: &[PathBuf]) -> Scope {
+        Scope {
+            cli: Destination::Targets(dirs.to_vec()),
+            root: PathBuf::new(),
+        }
+    }
+
+    fn one(target: &Path) -> Scope {
+        targets(&[target.to_path_buf()])
+    }
+
+    /// A run with neither `--target` nor `--client`, with the client
+    /// directories under `root`.
+    fn plain(root: &Path) -> Scope {
+        Scope {
+            cli: Destination::Default,
+            root: root.to_path_buf(),
+        }
     }
 
     fn actions(report: &Report) -> Vec<(Action, &str)> {
@@ -829,7 +884,7 @@ mod tests {
             .to_string();
 
         assert!(
-            error.contains("two sources provide the skill `demo`"),
+            error.contains("two sources provide the skill `demo` in"),
             "{error}"
         );
     }
@@ -897,7 +952,7 @@ mod tests {
 
         let report = update(
             &config,
-            &[claude.clone(), agents.clone()],
+            &targets(&[claude.clone(), agents.clone()]),
             &mock,
             false,
             false,
@@ -924,9 +979,12 @@ mod tests {
         let config = config_with(1);
         let mock = materializer(source.path());
 
-        update(
+        update(&config, &one(&claude), &mock, false, false, false)
+            .await
+            .unwrap();
+        let report = update(
             &config,
-            std::slice::from_ref(&claude),
+            &targets(&[claude, agents]),
             &mock,
             false,
             false,
@@ -934,12 +992,260 @@ mod tests {
         )
         .await
         .unwrap();
-        let report = update(&config, &[claude, agents], &mock, false, false, false)
-            .await
-            .unwrap();
 
         assert_eq!(report.count(Action::Unchanged), 1);
         assert_eq!(report.count(Action::Added), 1);
+    }
+
+    #[tokio::test]
+    async fn deploys_into_the_skill_directories_of_every_client_by_default() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let config = config_owned_by(configs.path(), "a.yaml");
+        let mock = materializer(source.path());
+
+        let report = update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        let visited: Vec<_> = report.summaries.iter().map(|s| s.target.clone()).collect();
+        assert_eq!(
+            visited,
+            [
+                root.path().join(".claude/skills"),
+                root.path().join(".agents/skills")
+            ]
+        );
+        assert!(root.path().join(".agents/skills/demo/SKILL.md").is_file());
+    }
+
+    /// `config` sending its one entry to `destination`.
+    fn sending(config: Config, destination: Destination) -> Config {
+        let mut config = config;
+        let Repo::Git { paths, .. } = &mut config.repos[0] else {
+            unreachable!()
+        };
+        paths[0].destination = destination;
+        config
+    }
+
+    #[tokio::test]
+    async fn prunes_a_client_directory_the_config_no_longer_sends_anything_to() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let both = config_owned_by(configs.path(), "a.yaml");
+        let claude_only = Config {
+            clients: Some(vec![Client::ClaudeCode]),
+            ..both.clone()
+        };
+        let mock = materializer(source.path());
+        let agents = root.path().join(".agents/skills");
+        update(&both, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        let dry = update(&claude_only, &plain(root.path()), &mock, true, false, false)
+            .await
+            .unwrap();
+        assert_eq!(dry.summaries[1].target, agents);
+        assert!(State::path(&agents).is_file());
+        let report = update(
+            &claude_only,
+            &plain(root.path()),
+            &mock,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.summaries.len(), 2);
+        assert_eq!(report.summaries[1].target, agents);
+        assert_eq!(
+            report.summaries[1].changes,
+            [Change {
+                action: Action::Removed,
+                name: "demo".to_owned(),
+                origin: String::new()
+            }]
+        );
+        assert!(!agents.exists());
+        assert!(root.path().join(".claude/skills/demo").is_dir());
+        let again = update(
+            &claude_only,
+            &plain(root.path()),
+            &mock,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(again.summaries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn keeps_a_pruned_directory_that_holds_something_else() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let config = config_owned_by(configs.path(), "a.yaml");
+        let mock = materializer(source.path());
+        let claude = root.path().join(".claude/skills");
+        update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+        std::fs::create_dir_all(claude.join("handwritten")).unwrap();
+
+        let moved = sending(config, Destination::Clients(vec![Client::OpenCode]));
+        update(&moved, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        assert!(!claude.join("demo").exists());
+        assert!(!State::path(&claude).exists());
+        assert!(claude.join("handwritten").is_dir());
+    }
+
+    #[tokio::test]
+    async fn moving_an_entry_to_targets_prunes_the_client_directories() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let config = config_owned_by(configs.path(), "a.yaml");
+        let mock = materializer(source.path());
+        update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        let out = root.path().join("out");
+        let moved = sending(config, Destination::Targets(vec![out.clone()]));
+        let report = update(&moved, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        assert_eq!(report.summaries.len(), 3);
+        assert_eq!(report.count(Action::Added), 1);
+        assert_eq!(report.count(Action::Removed), 2);
+        assert!(out.join("demo").is_dir());
+        assert!(!root.path().join(".claude/skills").exists());
+        assert!(!root.path().join(".agents/skills").exists());
+    }
+
+    #[tokio::test]
+    async fn leaves_a_client_directory_another_config_owns_alone() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let other = config_owned_by(configs.path(), "b.yaml");
+        let mine = sending(
+            config_owned_by(configs.path(), "a.yaml"),
+            Destination::Clients(vec![Client::ClaudeCode]),
+        );
+        let mock = materializer(source.path());
+        let agents = root.path().join(".agents/skills");
+        update(
+            &other,
+            &targets(std::slice::from_ref(&agents)),
+            &mock,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let report = update(&mine, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        assert_eq!(report.summaries.len(), 1);
+        assert!(agents.join("demo").is_dir());
+    }
+
+    #[tokio::test]
+    async fn an_overridden_run_visits_only_the_directories_it_names() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let config = config_owned_by(configs.path(), "a.yaml");
+        let mock = materializer(source.path());
+        update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+        let elsewhere = root.path().join("elsewhere");
+        let claude_only = Scope {
+            cli: Destination::Clients(vec![Client::ClaudeCode]),
+            root: root.path().to_path_buf(),
+        };
+
+        for scope in [one(&elsewhere), claude_only] {
+            let report = update(&config, &scope, &mock, false, false, false)
+                .await
+                .unwrap();
+
+            assert_eq!(report.summaries.len(), 1);
+            assert_eq!(report.count(Action::Removed), 0);
+        }
+        assert!(root.path().join(".agents/skills/demo").is_dir());
+    }
+
+    #[tokio::test]
+    async fn one_name_may_go_to_two_directories_from_two_entries() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let mut config = config_with(2);
+        for (repo, client) in config.repos.iter_mut().zip(Client::ALL) {
+            let Repo::Git { paths, .. } = repo else {
+                unreachable!()
+            };
+            paths[0].destination = Destination::Clients(vec![client]);
+        }
+        let mock = materializer(source.path());
+
+        let report = update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        assert_eq!(report.count(Action::Added), 2);
+        let claude = State::load(&root.path().join(".claude/skills")).unwrap();
+        let agents = State::load(&root.path().join(".agents/skills")).unwrap();
+        assert_eq!(claude.skills["demo"].repo, "https://example.invalid/0.git");
+        assert_eq!(agents.skills["demo"].repo, "https://example.invalid/1.git");
+    }
+
+    #[tokio::test]
+    async fn two_spellings_of_one_directory_share_one_plan() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        let mut config = config_with(2);
+        let Repo::Git { paths, .. } = &mut config.repos[0] else {
+            unreachable!()
+        };
+        paths[0].destination = Destination::Targets(vec![root.path().join("./.claude/skills")]);
+        config.clients = Some(vec![Client::ClaudeCode]);
+        let mock = materializer(source.path());
+
+        let error = update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("two sources provide the skill `demo` in"),
+            "{error}"
+        );
     }
 
     #[test]

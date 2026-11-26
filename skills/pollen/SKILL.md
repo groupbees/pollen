@@ -38,10 +38,14 @@ git host accepts; public ones work over HTTPS as is.
 | Project | `pollen.yaml` at the project root, committed | `pollen update` | `.claude/skills/` + `.agents/skills/` — gitignore both |
 | Machine | `~/.config/pollen/pollen.yaml` (`$XDG_CONFIG_HOME`) | `pollen update -g` | `~/.claude/skills/` + `~/.agents/skills/` |
 
-`clients: claude` (or `agent-skills`; default `all`; `version: 2` only)
-deploys into one of the pair only; `targets: [<dir>, …]` names other
-directories instead.
-`--client` and `--target` override both for one run.
+Top-level `clients: claude-code` (or `opencode`; default `all`; `version: 2`
+only) deploys into one of the pair only. Each `skills` item of a `repo` and
+each `discovery` origin can name its own `clients`, or `targets: [<dir>, …]`
+for directories instead of any client's, never both. An update also prunes the
+client directories whose `.pollen.json` names this config and that no entry sends
+anything to. For one run, `--target` replaces every entry's destination
+and `--client` keeps only what the config sends to those clients; neither
+visits anything else.
 
 One config per target directory: an update removes whatever its config does
 not declare, so pollen refuses a directory another config manages. Add sources

@@ -71,9 +71,10 @@ pub struct Options {
     /// Use the user-level config and deploy into the user's skill directories.
     ///
     /// Reads `$XDG_CONFIG_HOME/pollen/pollen.yaml` (`~/.config/pollen/pollen.yaml`
-    /// when unset, `%APPDATA%\pollen\pollen.yaml` on Windows); when it sets no
-    /// `targets`, its `clients` deploy under the home directory, into
-    /// `~/.claude/skills` and `~/.agents/skills` by default.
+    /// when unset, `%APPDATA%\pollen\pollen.yaml` on Windows); the skill
+    /// directories of its clients are under the home directory, so an entry
+    /// naming no `targets` deploys into `~/.claude/skills` and
+    /// `~/.agents/skills` by default.
     #[arg(
         long,
         short = 'g',
@@ -83,9 +84,10 @@ pub struct Options {
     )]
     pub global: bool,
 
-    /// Directory to deploy into, overriding the config's `targets` and `clients`.
+    /// Directory to deploy into, instead of the destination of every entry.
     ///
-    /// Repeat the flag for several directories. The environment variable
+    /// The run visits no other directory. Repeat the flag for several
+    /// directories. The environment variable
     /// takes a list separated like `PATH`: `;` on Windows, `:` elsewhere.
     #[arg(
         long = "target",
@@ -95,10 +97,12 @@ pub struct Options {
     )]
     pub targets: Vec<PathBuf>,
 
-    /// Client to deploy for, overriding the config's `targets` and `clients`.
+    /// Client to deploy for: only what the config sends to it.
     ///
-    /// Repeat the flag for several clients. The environment variable takes a
-    /// comma-separated list.
+    /// An entry sent to other clients or to `targets` deploys nothing in
+    /// that run, and the run visits no other directory. Repeat the flag for
+    /// several clients. The environment variable takes a comma-separated
+    /// list.
     #[arg(
         long = "client",
         env = "POLLEN_CLIENTS",
@@ -149,8 +153,8 @@ impl ValueEnum for ClientChoice {
 
     fn to_possible_value(&self) -> Option<PossibleValue> {
         let help = match self {
-            Self::Claude => "Claude Code, into `.claude/skills`",
-            Self::AgentSkills => "Every other Agent Skills client, into `.agents/skills`",
+            Self::ClaudeCode => "Claude Code, skills into `.claude/skills`",
+            Self::OpenCode => "OpenCode, skills into `.agents/skills`",
             Self::All => "Every client",
         };
         Some(PossibleValue::new(self.name()).help(help))
@@ -434,7 +438,7 @@ pub enum ConfigCommand {
     /// Rewrite `pollen.yaml` in the newest format version.
     ///
     /// Comments and layout are kept, and the file is written only if it
-    /// declares the same sources and targets as before. A file already in the
+    /// declares the same sources and destinations as before. A file already in the
     /// newest version is left alone.
     Migrate {
         /// Show what would change without writing the file.
@@ -611,17 +615,17 @@ mod tests {
         let repeated = Cli::parse_from([
             "pollen",
             "--client",
-            "agent-skills",
+            "opencode",
             "--client",
-            "claude",
+            "claude-code",
             "update",
         ]);
-        let listed = Cli::parse_from(["pollen", "update", "--client", "agent-skills,claude"]);
+        let listed = Cli::parse_from(["pollen", "update", "--client", "opencode,claude-code"]);
         let all = Cli::parse_from(["pollen", "update", "--client", "all"]);
 
         assert_eq!(
             repeated.options.clients(),
-            [Client::AgentSkills, Client::Claude]
+            [Client::OpenCode, Client::ClaudeCode]
         );
         assert_eq!(listed.options.clients(), repeated.options.clients());
         assert_eq!(all.options.clients(), Client::ALL);
@@ -646,7 +650,12 @@ mod tests {
         assert!(Cli::try_parse_from(["pollen", "update", "--client", "cursor"]).is_err());
         assert!(
             Cli::try_parse_from([
-                "pollen", "update", "--client", "claude", "--target", "skills"
+                "pollen",
+                "update",
+                "--client",
+                "claude-code",
+                "--target",
+                "skills"
             ])
             .is_err()
         );
