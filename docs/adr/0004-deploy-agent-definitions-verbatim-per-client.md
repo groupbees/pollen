@@ -39,9 +39,10 @@ qualify; a client whose agents live inside a shared config file
 entries recorded in its state file, never parts of a file. `discovery`
 origins stay skills-only: the v0.2.0 index has no agent type.
 
-**Verbatim, per client.** An agent file is copied byte for byte into the
-agent directory of the one client it was written for. pollen never
-translates between formats.
+**Verbatim.** An agent file is copied byte for byte into the agent directory
+of each client its entry deploys for. pollen never translates between
+formats: a file deployed for two clients must suit both, and is validated
+against each of them.
 
 **Clients are data.** Each client is one row of a table: an optional skill
 directory, an optional agent directory, its user-level root, its agent file
@@ -64,27 +65,39 @@ through `targets`.
 list beside `skills:`. Following
 [ADR 0003](0003-version-the-config-format.md), it is a new optional key of
 version 2, which does not move the version; a version 1 file using it is
-refused with a hint to migrate, as `clients` is. Each item names a `path`, a required `client` — never inferred from
-the content — and an optional `exclude`. The files directly under `path` with
-that client's extension are agents; a file whose frontmatter is invalid fails
-the run, as a skill does. The plan is keyed by kind, client and name, so a
-skill and an agent, or one name across two clients, do not collide.
+refused with a hint to migrate, as `clients` is. Each item names a `path`,
+an optional `exclude` and an optional destination. The files directly under
+`path` with the agent extension, `.md` for every client in the table, are
+agents; a file whose frontmatter is invalid fails the run, as a skill does.
+
+**Destinations, per entry.** Every entry of `repos[].skills`,
+`repos[].agents` and `discovery` says where it lands, the same way for skills
+and agents: `clients`, one or a list, or `targets`, directories; the two are
+mutually exclusive. An entry naming neither takes the top-level `clients`.
+For a skill, a client stands for its skill directory; for an agent, for its
+agent directory, and the file is validated against that client's identity
+rule and required fields. An agent sent to `targets` has no client, so it
+passes only the checks every client shares: a frontmatter, a file stem
+following the name rules, no invisible character. Version 2 has no top-level
+`targets`: `pollen config migrate` copies a version 1 `targets` into each
+entry. The plan is keyed by destination directory and name, so a skill and an
+agent, or one name in two directories, do not collide; two entries sending
+one name to the same directory is an error.
 
 **Where things land.**
 
-- `clients` defaults to `all`, every client pollen knows, and `all` grows as
-  pollen learns clients. With `claude-code` and `opencode`, it writes the
-  same skill directories as the default before agents. An agent is deployed
-  only for a client in `clients` that the config declares agents for, and a
+- The top-level `clients` defaults to `all`, every client pollen knows, and
+  `all` grows as pollen learns clients. With `claude-code` and `opencode`, it
+  writes the same skill directories as the default before agents. A
   directory is created only when something is planned for it.
-- `targets` and `clients` combine: `targets` replaces the skill directories
-  only, and agent directories always come from `clients`.
-- A run with `--target` deploys skills only, into those directories, and
-  visits no agent directory. A run with `--client` deploys for those clients.
-- When the clients come from the config, with neither flag, the run also
-  visits every known client directory in its scope whose state file names
-  this config, and prunes what the config no longer plans there. Dropping a
-  client from `clients` therefore removes what pollen deployed for it.
+- A run with `--target` deploys skills only, into those directories in place
+  of every entry's destination, and visits no agent directory. A run with
+  `--client` deploys every entry for those clients in place of its own
+  destination.
+- With neither flag, the run also visits every known client directory in its
+  scope whose state file names this config, and prunes what the config no
+  longer plans there. Dropping a client, or moving an entry from `clients` to
+  `targets`, therefore removes what pollen deployed there.
 
 **State.** The state file records its kind, `skills` or `agents`, and pollen
 refuses to deploy one kind into a directory owned for the other. An agent
@@ -101,11 +114,11 @@ permission mode and whether it declares hooks or MCP servers.
 flowchart LR
     yaml[pollen.yaml] --> config[config]
     config -->|skills| skilldiscovery[skill discovery]
-    config -->|agents + client| agents[agent selection]
+    config -->|agents| agents[agent selection]
     skilldiscovery --> skill[skill validation]
-    agents --> agentcheck[per-client validation]
+    agents --> agentcheck[validation per destination client]
     clients[(client table)] --> plan
-    skill --> plan[plan, keyed by kind, client, name]
+    skill --> plan[plan, keyed by directory and name]
     agentcheck --> plan
     plan --> update[update]
     update --> skilldirs[(skill directories)]
@@ -117,16 +130,23 @@ flowchart LR
 - One config deploys agents for several clients with the pinning, ownership,
   pruning and checks skills already have, project-locally, with no
   marketplace.
-- An author targeting two clients maintains two files; pollen never keeps
-  them in step.
+- One agent file can serve two clients when it suits both. When their
+  formats disagree on what the agent needs — tools, model — the author keeps
+  one file per client, each under an entry naming its client; pollen never
+  keeps them in step.
+- With the default `all`, an agents entry naming no client deploys its files
+  to every client in the table, so a file written for one client reaches the
+  others as written, once it passes their validation.
 - Upgrading pollen can change what `all` deploys. A new client sharing an
-  existing skill directory adds nothing, and one with agents adds files only
-  where the config declares agents for it; a client with a skill directory of
+  existing skill directory adds nothing, and one with an agent directory adds
+  the agents of every entry naming no client; a client with a skill directory of
   its own would add a copy of every skill on upgrade, and its release notes
   must say so.
 - A run can modify a directory its config no longer names, though only one
-  whose state file names that config. A directory dropped from `targets`
-  still keeps its skills, as pollen cannot know it.
+  whose state file names that config. A directory no entry's `targets` names
+  any more keeps what pollen deployed there, as pollen cannot know it.
+- A config sending everything to one directory of its own repeats `targets`
+  on each entry.
 - `--target` cannot exercise agents; testing them goes through `--client`.
 - A tool pollen does not know cannot receive agents until a release adds its
   row.
@@ -135,14 +155,14 @@ flowchart LR
 - pollen refuses state files from a later version, so a version 2 file stops
   an older pollen until it is upgraded.
 - No value selects "every client reading `.agents/skills`": a user of a
-  client absent from the table writes `targets: [.agents/skills]`, and
-  widening that set takes a release per client.
+  client absent from the table writes `targets: [.agents/skills]` on an
+  entry, and widening that set takes a release per client.
 - The `clients` surface — the key, `--client`, `POLLEN_CLIENTS`, `clients=`
   in Python — stays, with `claude-code` and `opencode` as its values instead
   of `claude` and `agent-skills`; the one-directory `Client` becomes the
-  table, and the exclusivity between `targets` and `clients` goes. Version 2
-  and `clients` are unreleased, so the renaming lands before the first
-  release that carries them, and no release ships the old values.
+  table, and the top-level `targets` of version 2 moves onto each entry.
+  Version 2 and `clients` are unreleased, so these changes land before the
+  first release that carries them, and no release ships the old shape.
 
 ## Alternatives considered
 
@@ -160,8 +180,15 @@ flowchart LR
   config file and its directory.
 - **User-defined clients in `pollen.yaml`**: they bypass per-client validation
   and the identity rule that stops one agent shadowing another.
-- **`targets` and `clients` mutually exclusive**: a config with a skill
-  directory of its own could never deploy agents.
+- **A top-level `targets` beside the top-level `clients`**, mutually
+  exclusive: a config with a skill directory of its own could never deploy
+  agents. Combined, `targets` replacing the skill directories only: two keys
+  each decide half of every destination, `clients` is silently inert for
+  skills, and moving skills to `targets` removes them from the clients'
+  directories with nothing in the entry saying so.
+- **A required `client` on each agents entry**: it keeps one file per client
+  by construction, but declares an agent's destination differently from a
+  skill's, and needs one entry per client for a file that suits several.
 - **`--target` deploying agents too**: a one-off run into a scratch directory
   would rewrite the user's real agent directories.
 - **Leaving a dropped client's directories in place**: consistent with a
