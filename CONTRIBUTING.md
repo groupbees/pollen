@@ -228,7 +228,7 @@ commit gate stays fast.
 | [security.yaml](.github/workflows/security.yaml) | Trivy scan of the repository | `trivy fs .` |
 | [scorecard.yaml](.github/workflows/scorecard.yaml) | OpenSSF Scorecard analysis, for the README badge | none: it reads the repository's settings on GitHub |
 | [renovate.yaml](.github/workflows/renovate.yaml) | Dependency and security update pull requests, from Dependabot alerts and [OSV](https://osv.dev), per [renovate.json](renovate.json) | none: run it manually with `dryRun` to see what it would open |
-| [release.yaml](.github/workflows/release.yaml) | Publishes a `v*` tag: archives, SBOM and attestations, the Homebrew formula, the PyPI wheels | none: it publishes |
+| [release.yaml](.github/workflows/release.yaml) | Publishes a `v*` tag: archives, SBOM, attestations and their Sigstore bundle, the Homebrew formula, the PyPI wheels | none: it publishes |
 
 `quality` and `security` are the checks that block a merge; `docs` is
 path-filtered on `docs/` outside `docs/adr/`, `assets/` and its own
