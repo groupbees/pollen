@@ -9,10 +9,10 @@
 version: 2
 
 # The clients an entry naming neither `clients` nor `targets` deploys for:
-# `claude-code` (skills in .claude/skills) and `opencode` (skills in
-# .agents/skills, the cross-client convention most other Agent Skills clients
-# scan too). Under the home directory with --global. Default: all, every
-# client this pollen knows.
+# `claude-code` (skills in .claude/skills, agents in .claude/agents) and
+# `opencode` (skills in .agents/skills, the cross-client convention most other
+# Agent Skills clients scan too, agents in .opencode/agents). The user's
+# directories with --global. Default: all, every client this pollen knows.
 clients: all
 
 repos:
@@ -49,6 +49,25 @@ repos:
         targets:
           - ~/team/skills
 
+  # Agent definitions: every `.md` file directly under `path`, copied as is
+  # into the agent directory of each client, and checked against each
+  # client's rules. A `repo` needs `skills`, `agents`, or both.
+  - repo: https://github.com/acme/agents
+    revision: v1.4.0
+    agents:
+      # Written for Claude Code: `name` equal to the file name, and a
+      # `description`.
+      - path: claude
+        exclude: ^README$  # matched against the file name without `.md`
+        clients: claude-code
+      # Written for OpenCode: a `description`.
+      - path: opencode
+        clients: opencode
+      # Directories of your own, as on a `skills` item.
+      - path: shared
+        targets:
+          - ~/team/agents
+
 # Origins serving an Agent Skills discovery index,
 # /.well-known/agent-skills/index.json. A file needs `repos`, `discovery`, or
 # both.
@@ -56,7 +75,7 @@ discovery:
   # Every skill the index lists, except the ones whose name matches `exclude`.
   - url: https://skills.example.org  # an origin: no path
     exclude: ^experimental-  # default: none
-    clients: opencode  # or `targets`, as on a `skills` item
+    clients: opencode  # or `targets`, as on a `skills` item; no `agents`
 
   # Only the listed skills. A `digest` pins the artifact;
   # `pollen autoupdate --freeze` writes it. Tokens for an origin go in

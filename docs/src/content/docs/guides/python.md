@@ -54,9 +54,12 @@ for summary in report.summaries:
         print(summary.target, change.action, change.name, change.origin)
 ```
 
-`update` returns a `Report` with one `Summary` per directory it visited. Each
-change has an `action`, a `pollen.Action` that compares equal to its value
-(`"added"`, `"updated"`, `"unchanged"`, `"removed"`). `report.count(action)`
+`update` returns a `Report` with one `Summary` per directory it visited, whose
+`kind` is `pollen.Kind.SKILLS` or `pollen.Kind.AGENTS`. Each change has an
+`action`, a `pollen.Action` that compares equal to its value (`"added"`,
+`"updated"`, `"unchanged"`, `"removed"`); the change of an agent also carries
+`details`, a `pollen.AgentDetails` with the `tools`, `model` and `permission`
+its frontmatter sets and whether it declares `hooks` or `mcp_servers`. `report.count(action)`
 totals one action across every target:
 
 ```python
@@ -74,8 +77,8 @@ work like the CLI's global flags:
 | --- | --- | --- |
 | `config` | `--config` | `pollen.yaml`, from the working directory |
 | `global_` | `--global` | `False`; cannot be combined with `config` |
-| `targets` | `--target` | each entry's `clients` or `targets`, else the top-level `clients` |
-| `clients` | `--client` | every client; keeps only what the config sends to these clients: `"claude-code"`, `"opencode"` or `"all"`, and not with `targets` |
+| `targets` | `--target` | each entry's `clients` or `targets`, else the top-level `clients`; skills only, so a call with it deploys no agent |
+| `clients` | `--client` | every client; keeps only the skills and agents the config sends to these clients: `"claude-code"`, `"opencode"` or `"all"`, and not with `targets` |
 | `cache_dir` | `--cache-dir` | the user cache directory |
 | `offline` | `--offline` | `False` |
 | `credentials_file` | `--credentials-file` | the user-level credentials file, which may be absent; taken by `update`, `validate`, `outdated` and `autoupdate` |
@@ -94,12 +97,17 @@ the arguments instead.
 | `outdated(min_release_age=None)` | `pollen outdated` | `list[SourceStatus \| DigestStatus]` |
 | `autoupdate(freeze=False, dry_run=False, min_release_age=None)` | `pollen autoupdate` | `AutoupdateOutcome` |
 | `migrate(dry_run=False)` | `pollen config migrate` | `Migration` |
-| `show(repo, revision=None, path=None)` | `pollen show` | `Listing` |
+| `show(repo, revision=None, path=None, agents=None)` | `pollen show` | `Listing` |
 | `schema()` | `pollen schema` | the JSON Schema, as a `str` |
 
 `validate` checks one config file. It raises `PollenError` when the file is
-invalid or a selected skill is, with every offending skill in the message. Otherwise it returns the skills the config
-selects, or `skills=None` with `config_only=True`.
+invalid or a selected skill or agent is, with every offending one in the
+message, and the client whose rule an agent breaks. Otherwise it returns the
+skills and agents the config selects, or `skills=None` and `agents=None` with
+`config_only=True`.
+
+`list_installed` returns one `Deployed` per directory, whose `kind` says
+whether its entries are in `skills` or in `agents`.
 
 `outdated` and `autoupdate` ask each remote for its tags and each
 `discovery` origin for its index, so they take no `offline` argument.
@@ -111,7 +119,9 @@ moved revisions in `bumps` and the written digests in `digests`. `autoupdate` re
 release it leaves out is the status's `pending`, with its `age`.
 
 `show` lists invalid skills with their `error` set, as the CLI does, instead
-of raising.
+of raising. `agents` takes `(path, client)` pairs, the `--agents CLIENT:PATH`
+of the command line: the agent files directly under each path are listed in
+`listing.agents`, checked against that client's rules.
 
 The types are documented in the package itself: `help(pollen.Listing)`, or
 your editor, since the package ships type stubs.

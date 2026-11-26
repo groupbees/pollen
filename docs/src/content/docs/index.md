@@ -6,12 +6,13 @@ description: Deploy Agent Skills from git repositories, local directories and we
 `pollen` makes your skills directories match a `pollen.yaml`: it installs the
 [Agent Skills](https://agentskills.io) the file declares, refreshes what moved
 and removes what you dropped, for Claude Code and every other Agent Skills
-client.
+client. It deploys agent definitions the same way, as is, into the agent
+directories of Claude Code and OpenCode.
 
 - [Installation](/guides/installation/): Homebrew, release archives, the
   Python package.
 - [Configuration file](/reference/configuration/): the sources to deploy from
-  and where the skills go.
+  and where the skills and agents go.
 - [Usage](/guides/usage/): `pollen update` and the commands that preview,
   validate, pin and upgrade.
 - [Well-known sources](/guides/well-known-sources/): skills served by a
