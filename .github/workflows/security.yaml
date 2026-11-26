@@ -55,7 +55,10 @@ jobs:
 
       - name: upload the SARIF report
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
-        if: always()
+        # A fork's pull request gets a read-only token, so the upload would fail.
+        if: >-
+          always() && (github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.full_name == github.repository)
         with:
           sarif_file: trivy.sarif
           category: trivy-fs

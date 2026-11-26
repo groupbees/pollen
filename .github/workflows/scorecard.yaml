@@ -8,7 +8,8 @@ on:
     - cron: "41 5 * * 1"
   branch_protection_rule:
 
-permissions: read-all
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,9 +21,8 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      actions: read
-      # Scorecard reads branch protection and settings; the upload needs
-      # security-events, and publishing the badge score needs id-token.
+      # The upload needs security-events, and publishing the badge score
+      # needs id-token.
       security-events: write
       id-token: write
     steps:
@@ -39,6 +39,7 @@ jobs:
           publish_results: true
 
       - name: upload the SARIF report
+        if: always()
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           sarif_file: scorecard.sarif

@@ -30,9 +30,10 @@ tasks:
       - cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 
   test:
-    desc: Run the Rust, Python and documentation site test suites
+    desc: Run the Rust, Python, documentation site and release script tests
     cmds:
       - task: test:rust
+      - task: test:release
       - task: test:python
       - task: test:docs
 
@@ -51,6 +52,11 @@ tasks:
     desc: Run the documentation site's unit tests
     cmds:
       - npm --prefix docs test
+
+  test:release:
+    desc: Check the release script against a throwaway repository
+    cmds:
+      - tests/release.sh
 
   test:litellm:
     desc: Deploy skills from a LiteLLM proxy (needs Docker with Compose)

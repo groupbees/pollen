@@ -29,6 +29,8 @@ jobs:
 
       - name: cache the cargo build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The docs hooks run Biome and astro check from the site's lockfile.
       - name: install the documentation site's dependencies
@@ -61,9 +63,15 @@ jobs:
 
       - name: cache the cargo build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: run the test suite
         run: task test:rust
+
+      - name: test the release script
+        if: runner.os == 'Linux'
+        run: task test:release
 
   # The release builds, so a target that stops building fails here rather
   # than on the tag.
@@ -99,6 +107,8 @@ jobs:
 
       - name: cache the cargo build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: build the bindings and run their tests
         # On the step: mise exports its own UV_PYTHON to the steps after it.
@@ -121,6 +131,8 @@ jobs:
 
       - name: cache the cargo build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: deploy skills from a LiteLLM proxy
         run: task test:litellm
