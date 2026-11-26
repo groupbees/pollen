@@ -9,35 +9,38 @@ A gateway, a registry or a documentation site can publish its skills at
 `/.well-known/agent-skills/index.json`, as the
 [Agent Skills Discovery via Well-Known URIs](https://github.com/cloudflare/agent-skills-discovery-rfc)
 specification (v0.2.0) describes. LiteLLM does it for the skills stored on its
-proxy, once `litellm_settings.public_skills_index` is on. A `well-known:`
-entry in `pollen.yaml` deploys those skills like any other.
+proxy, once `litellm_settings.public_skills_index` is on. An entry of the
+`discovery` list of `pollen.yaml` deploys those skills like any other.
 
 ## Declaring the source
 
 Take every skill of the index, leaving some out by name:
 
 ```yaml
-repos:
-  - well-known: https://gateway.example.com
+version: 2
+discovery:
+  - url: https://gateway.example.com
     exclude: ^experimental-
 ```
 
 Or take a list of skills, each pinned to the digest of its artifact:
 
 ```yaml
-repos:
-  - well-known: https://gateway.example.com
+version: 2
+discovery:
+  - url: https://gateway.example.com
     skills:
       - name: pdf-summarizer
         digest: sha256:3f2a9c0d5b8e7f41a6c2d9e0b1f3a4c5d6e7f8091a2b3c4d5e6f708192a3b4c5
       - name: code-review
 ```
 
-`well-known` is an origin — scheme, host and optional port — with no path.
+`url` is an origin — scheme, host and optional port — with no path.
 pollen reads `<origin>/.well-known/agent-skills/index.json`, downloads each
 selected skill, either a `SKILL.md` or a `.tar.gz` or `.zip` archive, checks
 it against the index's `digest`, and deploys it. The keys are in the
-[configuration reference](/reference/configuration/).
+[configuration reference](/reference/configuration/). A version 1 file lists
+the origin in `repos`, as `- well-known: <origin>`, with the same keys.
 
 An entry pollen cannot install is skipped with a warning, and the rest of the
 index deploys: a type pollen does not know, a name the

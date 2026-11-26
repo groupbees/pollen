@@ -604,7 +604,7 @@ mod well_known {
         std::fs::write(
             &config,
             format!(
-                "repos:\n  - well-known: {}\n    skills:\n      - name: alpha\n",
+                "version: 2\ndiscovery:\n  - url: {}\n    skills:\n      - name: alpha\n",
                 server.uri()
             ),
         )

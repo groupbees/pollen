@@ -3,8 +3,9 @@
 # Every key pollen understands, with its default in a comment.
 
 # The format version this file is written in. Default: 1, where each
-# `skills:` list of a `repo` is called `paths:`. `pollen config migrate`
-# rewrites an older file in the newest version.
+# `skills:` list of a `repo` is called `paths:` and each `discovery` origin is
+# a `well-known:` entry of `repos`. `pollen config migrate` rewrites an older
+# file in the newest version.
 version: 2
 
 # The clients the skills are deployed for, each through its own skill
@@ -43,15 +44,18 @@ repos:
     skills:
       - path: skills
 
-  # An origin serving /.well-known/agent-skills/index.json: every skill it
-  # lists, except the ones whose name matches `exclude`.
-  - well-known: https://skills.example.org
+# Origins serving an Agent Skills discovery index,
+# /.well-known/agent-skills/index.json. A file needs `repos`, `discovery`, or
+# both.
+discovery:
+  # Every skill the index lists, except the ones whose name matches `exclude`.
+  - url: https://skills.example.org  # an origin: no path
     exclude: ^experimental-  # default: none
 
-  # The same kind of source, taking only the listed skills. A `digest` pins
-  # the artifact; `pollen autoupdate --freeze` writes it. Tokens for an origin
-  # go in ~/.config/pollen/credentials.yaml, never here.
-  - well-known: https://gateway.example.com
+  # Only the listed skills. A `digest` pins the artifact;
+  # `pollen autoupdate --freeze` writes it. Tokens for an origin go in
+  # ~/.config/pollen/credentials.yaml, never here.
+  - url: https://gateway.example.com
     skills:
       - name: pdf-summarizer
         digest: sha256:3f2a9c0d5b8e7f41a6c2d9e0b1f3a4c5d6e7f8091a2b3c4d5e6f708192a3b4c5

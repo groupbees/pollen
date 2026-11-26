@@ -145,8 +145,9 @@ mod tests {
             "version: 1\nrepos:\n  - repo: local\n    paths:\n      - path: skills\n",
             "version: 2\nrepos:\n  - repo: local\n    skills:\n      - path: skills\n        recurse: true\n",
             "version: 2\nrepos:\n  - repo: https://x.example/a.git\n    revision: v1\n    skills:\n      - path: .\n",
-            "version: 2\nrepos:\n  - well-known: https://x.example\n    skills:\n      - name: a\n",
-            "version: 2\nrepos:\n  - well-known: https://x.example\n    exclude: ^a\n",
+            "version: 2\ndiscovery:\n  - url: https://x.example\n    skills:\n      - name: a\n",
+            "version: 2\ndiscovery:\n  - url: https://x.example\n    exclude: ^a\n",
+            "version: 2\nrepos:\n  - repo: local\n    skills:\n      - path: .\ndiscovery:\n  - url: https://x.example\n",
         ] {
             assert!(validator().is_valid(&yaml(config)), "{config}");
         }
@@ -158,8 +159,16 @@ mod tests {
             "version: 2\nrepos:\n  - repo: local\n    paths:\n      - path: .\n",
             "repos:\n  - repo: local\n    skills:\n      - path: .\n",
             "version: 2\nrepos:\n  - repo: local\n    skills:\n      - name: a\n",
-            "version: 2\nrepos:\n  - well-known: https://x.example\n    skills:\n      - path: .\n",
+            "version: 2\nrepos:\n  - well-known: https://x.example\n",
+            "version: 2\ndiscovery:\n  - url: https://x.example\n    skills:\n      - path: .\n",
+            "version: 2\ndiscovery:\n  - url: https://x.example\n    revision: v1\n",
+            "version: 2\ndiscovery:\n  - url: https://x.example\n    exclude: ^a\n    skills:\n      - name: a\n",
+            "version: 2\ndiscovery: []\n",
+            "version: 2\ntargets: [out]\n",
+            "discovery:\n  - url: https://x.example\n",
             "version: 2\nrepos:\n  - repo: local\n",
+            "version: 2\nrepos:\n  - repo: local\n    revision: v1\n    skills:\n      - path: .\n",
+            "version: 2\nrepos:\n  - repo: https://x.example/a.git\n    skills:\n      - path: .\n",
             "version: 3\nrepos:\n  - repo: local\n    skills:\n      - path: .\n",
             "version: \"2\"\nrepos:\n  - repo: local\n    skills:\n      - path: .\n",
         ] {

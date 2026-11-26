@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-use anyhow::{Context as _, Result, bail, ensure};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use regex::Regex;
 
 use crate::cli::Options;
@@ -92,39 +92,124 @@ static PATHS_LINE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*(?:-\s+)?)paths:").expect("valid regex"));
 static REPO_KEY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*(?:-\s+)?repo:").expect("valid regex"));
+static WELL_KNOWN_KEY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*(?:-\s+)?)well-known:").expect("valid regex"));
+static REPOS_LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^repos:").expect("valid regex"));
+static REPOS_KEY_IN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^repos:").expect("valid regex"));
 static VERSION_LINE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^version:\s*[^#\s]+(.*)$").expect("valid regex"));
 
 /// The text of a version 1 `pollen.yaml`, said in version 2: `paths:` becomes
-/// `skills:` in every `repo` entry, and `version: 2` is set.
+/// `skills:` in every `repo` entry, every `well-known` entry moves, with the
+/// comments right above it, to a `discovery:` list after `repos:` and calls
+/// its origin `url:`, and `version: 2` is set.
 ///
 /// # Errors
 ///
-/// When an entry's `paths:` key or the place for `version` cannot be found.
+/// When an entry's keys or the place for `version` cannot be found.
 pub fn to_v2(text: &str) -> Result<String> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let mut out: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
+    let by_hand = || {
+        anyhow!(
+            "cannot find the keys of every `repos` entry, e.g. in YAML flow style; migrate by hand: rename each `paths:` to `skills:`, move each `well-known:` entry under `discovery:` as `url:`, and add `version: {LATEST}`"
+        )
+    };
 
-    let mut repo_entries = 0;
-    let mut renamed = 0;
-    for (start, end) in entries(&lines) {
-        if !lines[start..end].iter().any(|line| REPO_KEY.is_match(line)) {
-            continue;
-        }
-        repo_entries += 1;
-        if let Some(index) = (start..end).find(|&index| PATHS_LINE.is_match(lines[index])) {
+    let entries = entries(&lines);
+    let mut moved = vec![false; entries.len()];
+    for (which, &(start, end)) in entries.iter().enumerate() {
+        if lines[start..end].iter().any(|line| REPO_KEY.is_match(line)) {
+            let index = (start..end)
+                .find(|&index| PATHS_LINE.is_match(lines[index]))
+                .ok_or_else(by_hand)?;
             out[index] = PATHS_LINE.replace(lines[index], "${1}skills:").into_owned();
-            renamed += 1;
+        } else {
+            let index = (start..end)
+                .find(|&index| WELL_KNOWN_KEY.is_match(lines[index]))
+                .ok_or_else(by_hand)?;
+            out[index] = WELL_KNOWN_KEY
+                .replace(lines[index], "${1}url:")
+                .into_owned();
+            moved[which] = true;
         }
     }
-    if repo_entries == 0 || renamed != repo_entries {
-        bail!(
-            "cannot find the `paths:` key of every `repo` entry, e.g. in YAML flow style; migrate by hand: rename each `paths:` to `skills:` and add `version: {LATEST}`"
-        );
+    if entries.is_empty() {
+        return Err(by_hand());
     }
 
     set_version(&lines, &mut out)?;
+    if moved.iter().any(|moved| *moved) {
+        out = to_discovery(&lines, out, &entries, &moved)?;
+    }
     Ok(out.concat())
+}
+
+/// Move the `repos` entries `moved` marks under a `discovery:` key after
+/// `repos:`, or rename `repos:` itself when every entry moves.
+fn to_discovery(
+    lines: &[&str],
+    mut out: Vec<String>,
+    entries: &[(usize, usize)],
+    moved: &[bool],
+) -> Result<Vec<String>> {
+    let header = lines
+        .iter()
+        .position(|line| REPOS_LINE.is_match(line))
+        .ok_or_else(|| anyhow!("cannot find the `repos:` key; migrate by hand"))?;
+    let ending = if lines[header].ends_with("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    if moved.iter().all(|moved| *moved) {
+        // `version: 2` may have gone into the same line, above the key.
+        out[header] = REPOS_KEY_IN
+            .replace(&out[header], "discovery:")
+            .into_owned();
+        return Ok(out);
+    }
+
+    // Each entry with the comments right above it, which describe it.
+    let leads: Vec<usize> = entries
+        .iter()
+        .map(|&(start, _)| {
+            let mut lead = start;
+            while lead > header + 1 && lines[lead - 1].trim_start().starts_with('#') {
+                lead -= 1;
+            }
+            lead
+        })
+        .collect();
+    // Blank lines closing the list stay after it, after `discovery:` now.
+    let mut region_end = entries.last().map_or(header + 1, |&(_, end)| end);
+    while region_end > leads[leads.len() - 1] + 1 && lines[region_end - 1].trim().is_empty() {
+        region_end -= 1;
+    }
+    let mut kept = Vec::new();
+    let mut discovery = Vec::new();
+    for (which, &lead) in leads.iter().enumerate() {
+        let end = leads.get(which + 1).copied().unwrap_or(region_end);
+        let block = if moved[which] {
+            &mut discovery
+        } else {
+            &mut kept
+        };
+        block.extend(out[lead..end].iter().cloned());
+    }
+    for line in kept.iter_mut().chain(discovery.iter_mut()) {
+        if !line.ends_with('\n') {
+            line.push_str(ending);
+        }
+    }
+
+    let mut rewritten: Vec<String> = out[..leads[0]].to_vec();
+    rewritten.extend(kept);
+    rewritten.push(format!("discovery:{ending}"));
+    rewritten.extend(discovery);
+    rewritten.extend(out[region_end..].iter().cloned());
+    Ok(rewritten)
 }
 
 /// Replace a top-level `version:` line, or insert one before the first
@@ -201,8 +286,42 @@ mod tests {
 
         assert_eq!(
             to_v2(text).unwrap(),
-            "# yaml-language-server: $schema=./schema.json\n# Skills.\nversion: 2\ntargets:\n  - .claude/skills\nrepos:\n  # The team's.\n  - repo: https://x.example/a.git\n    revision: v1.0.0  # pinned\n    skills:  # where\n      - path: skills\n        recurse: true\n  - well-known: https://x.example\n    skills:\n      - name: a\n  - skills:\n      - path: local-skills\n    repo: local\n"
+            "# yaml-language-server: $schema=./schema.json\n# Skills.\nversion: 2\ntargets:\n  - .claude/skills\nrepos:\n  # The team's.\n  - repo: https://x.example/a.git\n    revision: v1.0.0  # pinned\n    skills:  # where\n      - path: skills\n        recurse: true\n  - skills:\n      - path: local-skills\n    repo: local\ndiscovery:\n  - url: https://x.example\n    skills:\n      - name: a\n"
         );
+    }
+
+    #[test]
+    fn moves_well_known_entries_with_their_comments_to_discovery() {
+        let text = "repos:  # sources\n  # A gateway.\n  - well-known: https://g.example  # SSO\n    exclude: ^beta-\n\n  # Ours.\n  - repo: local\n    paths:\n      - path: .\n\n  - skills:\n      - name: a\n    well-known: https://h.example\n\ntargets:\n  - out\n";
+
+        assert_eq!(
+            to_v2(text).unwrap(),
+            "version: 2\nrepos:  # sources\n  # Ours.\n  - repo: local\n    skills:\n      - path: .\n\ndiscovery:\n  # A gateway.\n  - url: https://g.example  # SSO\n    exclude: ^beta-\n\n  - skills:\n      - name: a\n    url: https://h.example\n\ntargets:\n  - out\n"
+        );
+    }
+
+    #[test]
+    fn renames_repos_when_every_entry_is_well_known() {
+        assert_eq!(
+            to_v2("repos:\r\n  - well-known: https://g.example\r\n").unwrap(),
+            "version: 2\r\ndiscovery:\r\n  - url: https://g.example\r\n"
+        );
+    }
+
+    #[test]
+    fn migrates_a_well_known_file_to_an_equal_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pollen.yaml");
+        std::fs::write(
+            &path,
+            "repos:\n  - well-known: https://g.example/\n    skills:\n      - name: a\n  - repo: local\n    paths:\n      - path: .\n",
+        )
+        .unwrap();
+        let before = Config::load(&path).unwrap();
+
+        apply(&options(&path), false).unwrap();
+
+        assert_eq!(Config::load(&path).unwrap().repos, before.repos);
     }
 
     #[test]

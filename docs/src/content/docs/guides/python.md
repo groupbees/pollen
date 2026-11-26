@@ -99,9 +99,9 @@ invalid or a selected skill is, with every offending skill in the message. Other
 selects, or `skills=None` with `config_only=True`.
 
 `outdated` and `autoupdate` ask each remote for its tags and each
-`well-known` origin for its index, so they take no `offline` argument.
+`discovery` origin for its index, so they take no `offline` argument.
 `outdated` returns a `SourceStatus` per git source and a `DigestStatus` per
-skill listed under a `well-known` source; `autoupdate`'s outcome lists the
+skill listed under a `discovery` origin; `autoupdate`'s outcome lists the
 moved revisions in `bumps` and the written digests in `digests`. `autoupdate` rewrites `pollen.yaml` unless `dry_run`;
 `outcome.written` says whether it did. `min_release_age` is a
 `datetime.timedelta`, the `--min-release-age` of the command line; the newest
