@@ -1,0 +1,23 @@
+min_version = "2026.11.10"
+
+[tools]
+"cargo:cargo-edit" = "0.13.14"
+node = "24.22.3"
+pre-commit = "4.7.0"
+python = "3.15.2"
+rust = { version = "1.97.1", components = [
+  "rustfmt",
+  "clippy",
+], profile = "minimal" }
+task = "3.54.0"
+trivy = "0.76.2"
+uv = "0.13.10"
+
+[env]
+# Guarded: a CI job that installs only some of the tools has no Python, and an
+# unguarded template fails every mise command there.
+UV_PYTHON = { value = "{% if tools.python %}{{ tools.python.path }}{% endif %}", tools = true }
+
+[settings]
+disable_backends = ["asdf", "vfox"]
+lockfile = true

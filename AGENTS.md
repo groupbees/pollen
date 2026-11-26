@@ -9,18 +9,19 @@ reasons: [ARCHITECTURE.md](ARCHITECTURE.md); workflow and CI:
 ## Before you push
 
 ```sh
-cargo test --all-targets --locked
-uv run --directory pollen-py pytest                # the Python bindings
-cargo clippy --workspace --all-targets -- -D warnings   # pedantic, warnings denied
-cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
-pre-commit run --all-files                         # fmt, schema, ruff, pyright, docs…
+task test           # Rust, the Python bindings, the docs site
+task lint           # every pre-commit hook: fmt, clippy, schema, ruff, pyright, docs…
+task lint:windows   # clippy on the Windows code paths, from any host
 ```
+
+Tools come from `mise install` (versions in `mise.toml`); `task --list`
+shows the rest.
 
 ## Rules
 
 - New behaviour comes with tests; a fix comes with the regression test that
   would have caught it. Tests stay offline.
-- Config types changed → `./scripts/generate-schema.sh` in the same commit.
+- Config types changed → `task schema` in the same commit.
 - A command's options or results changed → update `pollen-py` in the same PR:
   the binding in `src/lib.rs`, the dataclasses in `python/pollen/_types.py`,
   the stubs in `_pollen.pyi`, and the Python guide.
@@ -29,7 +30,7 @@ pre-commit run --all-files                         # fmt, schema, ruff, pyright,
   variables table for a new flag) in the same PR.
 - Platform-specific code is gated `#[cfg(unix)]` / `#[cfg(windows)]`; CI runs
   Linux and Windows.
-- Releases only through `scripts/release.sh <version>`.
+- Releases only through `scripts/release.sh <version>` (`task release -- <version>`).
 - Commits: descriptive titles, no Conventional Commits prefix, no
   `Co-Authored-By` or "Generated with" line (a hook rejects them). PRs:
   squash by default.

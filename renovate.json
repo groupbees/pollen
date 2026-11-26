@@ -65,6 +65,12 @@
       "groupName": "pre-commit hooks (minor and patch)"
     },
     {
+      "description": "Minor and patch bumps of the tools and toolchains in mise.toml land as one PR, mise.lock included; each major gets its own",
+      "matchManagers": ["mise"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "mise tools (minor and patch)"
+    },
+    {
       "description": "src/base-links.ts must build against the satteri that @astrojs/markdown-satteri uses, and Starlight and its plugins pin satteri too: one member bumped alone fails astro check on two copies",
       "matchManagers": ["npm"],
       "matchPackageNames": ["astro", "@astrojs/*", "satteri", "starlight-*"],

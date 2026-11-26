@@ -8,12 +8,18 @@ on:
       - docs/**
       - "!docs/adr/**"
       - assets/**
+      - mise.toml
+      - mise.lock
+      - Taskfile.yml
       - .github/workflows/docs.yaml
   pull_request:
     paths:
       - docs/**
       - "!docs/adr/**"
       - assets/**
+      - mise.toml
+      - mise.lock
+      - Taskfile.yml
       - .github/workflows/docs.yaml
   workflow_dispatch:
 
@@ -28,25 +34,23 @@ jobs:
   build:
     name: build
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: docs
     steps:
       - name: check out the repository with its tags
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+      - name: install the tools
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
         with:
-          node-version-file: docs/.nvmrc
+          cache: false
+          install_args: node task
 
       - name: install the dependencies
-        run: npm ci
+        run: task docs:install
 
       - name: build every version
-        run: npm run build:versions
+        run: task docs:build
 
       - name: keep the site for the deploy job
         if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}

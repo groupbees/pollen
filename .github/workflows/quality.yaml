@@ -21,33 +21,21 @@ jobs:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      - name: install the tools
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
+        with:
+          cache: false
+          install_args: rust node python uv pre-commit task
+
       - name: cache the cargo build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
 
-      - name: install the pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - name: install shellcheck
-        run: sudo apt-get update && sudo apt-get install --yes shellcheck
-
-      - name: set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
-        with:
-          node-version-file: docs/.nvmrc
-
       # The docs hooks run Biome and astro check from the site's lockfile.
       - name: install the documentation site's dependencies
-        run: npm ci --prefix docs
-
-      # The pyright hook runs through uv.
-      - name: set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
-
-      - name: install pre-commit
-        run: pipx install pre-commit
+        run: task docs:install
 
       - name: run every hook
-        run: pre-commit run --all-files --show-diff-on-failure
+        run: task lint -- --show-diff-on-failure
 
   test:
     name: test (${{ matrix.runner }})
@@ -65,14 +53,17 @@ jobs:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      - name: install the tools
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
+        with:
+          cache: false
+          install_args: rust task
+
       - name: cache the cargo build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
 
-      - name: install the pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
       - name: run the test suite
-        run: cargo test --all-targets --locked
+        run: task test:rust
 
   # The release builds, so a target that stops building fails here rather
   # than on the tag.
@@ -96,24 +87,24 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: pollen-py
-    env:
-      UV_PYTHON: ${{ matrix.python }}
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      - name: install the tools
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
+        with:
+          cache: false
+          install_args: rust uv task
+
       - name: cache the cargo build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
 
-      - name: install the pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - name: set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
-
       - name: build the bindings and run their tests
-        run: uv run --locked pytest
+        # On the step: mise exports its own UV_PYTHON to the steps after it.
+        env:
+          UV_PYTHON: ${{ matrix.python }}
+        run: task test:python
 
   litellm:
     name: litellm
@@ -122,14 +113,17 @@ jobs:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      - name: install the tools
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
+        with:
+          cache: false
+          install_args: rust task
+
       - name: cache the cargo build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
 
-      - name: install the pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
       - name: deploy skills from a LiteLLM proxy
-        run: tests/litellm.sh
+        run: task test:litellm
 
   homebrew-formula:
     name: homebrew formula
@@ -140,26 +134,30 @@ jobs:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      - name: install the tools
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
+        with:
+          cache: false
+          install_args: task
+
       - name: check the rendered formula
-        run: tests/homebrew-formula.sh
+        run: task test:homebrew
 
   docs-test:
     name: docs test
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: docs
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+      - name: install the tools
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
         with:
-          node-version-file: docs/.nvmrc
+          cache: false
+          install_args: node task
 
       - name: install the dependencies
-        run: npm ci
+        run: task docs:install
 
       - name: run the documentation site's tests
-        run: npm test
+        run: task test:docs
