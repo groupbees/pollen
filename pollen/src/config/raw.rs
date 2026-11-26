@@ -15,7 +15,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 
-use super::{ClientChoice, IndexSelection, LOCAL_REPO, Repo, is_digest, normalize_origin};
+use super::{
+    Client, ClientChoice, Destination, IndexSelection, LOCAL_REPO, Repo, Selection, is_digest,
+    normalize_origin,
+};
 
 /// The newest format version this pollen reads.
 pub const LATEST: u32 = 2;
@@ -132,20 +135,12 @@ pub struct V2 {
     /// The format version of this file.
     #[schemars(extend("const" = 2))]
     pub version: u32,
-    /// Directories the skills are deployed into, each getting a full copy,
-    /// instead of the skill directories of the `clients`.
+    /// The clients an entry naming neither `clients` nor `targets` deploys
+    /// for, one or a list: `all`, `claude-code` (skills in `.claude/skills`)
+    /// or `opencode` (skills in `.agents/skills`).
     ///
-    /// A relative path resolves against the working directory, and a leading
-    /// `~` is expanded.
-    #[validate(length(min = 1, message = "at least one target is required"))]
-    #[schemars(length(min = 1))]
-    pub targets: Option<Vec<PathBuf>>,
-    /// The clients pollen deploys for, one or a list: `all`, `claude-code`
-    /// (skills in `.claude/skills`) or `opencode` (skills in
-    /// `.agents/skills`).
-    ///
-    /// The directories are under the home directory with `--global`;
-    /// `targets` replaces their skill directories. Defaults to `all`.
+    /// The directories are under the home directory with `--global`.
+    /// Defaults to `all`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(custom(function = check_clients))]
     pub clients: Option<ClientList>,
@@ -213,14 +208,54 @@ pub struct RepoV2 {
     /// Where to look for skills inside the source.
     #[validate(length(min = 1, message = "at least one skill is required"), nested)]
     #[schemars(length(min = 1))]
-    pub skills: Vec<PathSpec>,
+    pub skills: Vec<SkillsV2>,
+}
+
+/// One place to look for skills inside a git or `local` source, in version
+/// 2, and where the skills it selects go.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Validate, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[validate(schema(function = check_destination_of_skills, skip_on_field_errors = true))]
+#[schemars(extend("not" = serde_json::json!({"required": ["clients", "targets"]})))]
+pub struct SkillsV2 {
+    /// Directory to search, relative to the source root.
+    ///
+    /// A directory holding a `SKILL.md` is itself the skill; otherwise its
+    /// subdirectories are searched.
+    #[validate(custom(function = check_contained_path))]
+    pub path: PathBuf,
+    /// Search the whole subtree rather than only the immediate children.
+    #[serde(default)]
+    pub recurse: bool,
+    /// Regular expression rejecting skills whose path under `path` matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(function = check_regex))]
+    #[schemars(extend("format" = "regex"))]
+    pub exclude: Option<String>,
+    /// The clients these skills are deployed for, one or a list, instead of
+    /// the top-level `clients`. Not with `targets`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(function = check_clients))]
+    pub clients: Option<ClientList>,
+    /// Directories these skills are deployed into, each getting a full copy,
+    /// instead of the skill directories of any client. Not with `clients`.
+    ///
+    /// A relative path resolves against the working directory, and a leading
+    /// `~` is expanded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(length(min = 1, message = "at least one target is required"))]
+    #[schemars(length(min = 1))]
+    pub targets: Option<Vec<PathBuf>>,
 }
 
 /// An origin serving an Agent Skills discovery index, in version 2.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, Validate, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[validate(schema(function = check_discovery_v2, skip_on_field_errors = true))]
-#[schemars(extend("not" = serde_json::json!({"required": ["exclude", "skills"]})))]
+#[schemars(extend("allOf" = serde_json::json!([
+    {"not": {"required": ["exclude", "skills"]}},
+    {"not": {"required": ["clients", "targets"]}}
+])))]
 pub struct DiscoveryV2 {
     /// An `https://` origin serving `/.well-known/agent-skills/index.json`,
     /// whose skills are downloaded and checked against the index's digests.
@@ -238,6 +273,20 @@ pub struct DiscoveryV2 {
     #[validate(length(min = 1, message = "at least one skill is required"), nested)]
     #[schemars(length(min = 1))]
     pub skills: Option<Vec<SkillPin>>,
+    /// The clients these skills are deployed for, one or a list, instead of
+    /// the top-level `clients`. Not with `targets`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(custom(function = check_clients))]
+    pub clients: Option<ClientList>,
+    /// Directories these skills are deployed into, each getting a full copy,
+    /// instead of the skill directories of any client. Not with `clients`.
+    ///
+    /// A relative path resolves against the working directory, and a leading
+    /// `~` is expanded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[validate(length(min = 1, message = "at least one target is required"))]
+    #[schemars(length(min = 1))]
+    pub targets: Option<Vec<PathBuf>>,
 }
 
 /// One skill taken from a `well-known` index.
@@ -282,7 +331,8 @@ pub struct PathSpec {
 
 impl From<V1> for V2 {
     /// A validated version 1 file, said in version 2: a `repo`'s `paths`
-    /// move under `skills`, and each `well-known` entry moves to `discovery`.
+    /// move under `skills`, each `well-known` entry moves to `discovery`, and
+    /// the top-level `targets` goes on every skills item and every origin.
     fn from(v1: V1) -> Self {
         let mut repos = Vec::new();
         let mut discovery = Vec::new();
@@ -291,19 +341,30 @@ impl From<V1> for V2 {
                 (Some(repo), _) => repos.push(RepoV2 {
                     repo,
                     revision: entry.revision,
-                    skills: entry.paths,
+                    skills: entry
+                        .paths
+                        .into_iter()
+                        .map(|spec| SkillsV2 {
+                            path: spec.path,
+                            recurse: spec.recurse,
+                            exclude: spec.exclude,
+                            clients: None,
+                            targets: v1.targets.clone(),
+                        })
+                        .collect(),
                 }),
                 (None, Some(url)) => discovery.push(DiscoveryV2 {
                     url,
                     exclude: entry.exclude,
                     skills: entry.skills,
+                    clients: None,
+                    targets: v1.targets.clone(),
                 }),
                 (None, None) => {}
             }
         }
         Self {
             version: 2,
-            targets: v1.targets,
             clients: None,
             repos: (!repos.is_empty()).then_some(repos),
             discovery: (!discovery.is_empty()).then_some(discovery),
@@ -330,14 +391,30 @@ impl RepoV2 {
     /// The model of a validated entry.
     #[must_use]
     pub fn into_model(self) -> Repo {
+        let paths = self.skills.into_iter().map(SkillsV2::into_model).collect();
         if self.repo == LOCAL_REPO {
-            Repo::Local { paths: self.skills }
+            Repo::Local { paths }
         } else {
             Repo::Git {
                 url: self.repo,
                 revision: self.revision.unwrap_or_default(),
-                paths: self.skills,
+                paths,
             }
+        }
+    }
+}
+
+impl SkillsV2 {
+    /// The model of a validated item.
+    #[must_use]
+    pub fn into_model(self) -> Selection {
+        Selection {
+            spec: PathSpec {
+                path: self.path,
+                recurse: self.recurse,
+                exclude: self.exclude,
+            },
+            destination: destination(self.clients.as_ref(), self.targets),
         }
     }
 }
@@ -355,7 +432,18 @@ impl DiscoveryV2 {
         Repo::WellKnown {
             origin: normalize_origin(&self.url).unwrap_or(self.url),
             skills,
+            destination: destination(self.clients.as_ref(), self.targets),
         }
+    }
+}
+
+/// The destination an entry's `clients` and `targets` name, which validation
+/// made mutually exclusive.
+fn destination(clients: Option<&ClientList>, targets: Option<Vec<PathBuf>>) -> Destination {
+    match (clients, targets) {
+        (_, Some(targets)) => Destination::Targets(targets),
+        (Some(clients), None) => Destination::Clients(Client::expand(clients.list())),
+        (None, None) => Destination::Default,
     }
 }
 
@@ -413,7 +501,25 @@ fn check_discovery_v2(origin: &DiscoveryV2) -> Result<(), ValidationError> {
     if origin.exclude.is_some() && origin.skills.is_some() {
         return Err(exclude_with_skills());
     }
+    check_one_destination(origin.clients.as_ref(), origin.targets.as_ref())?;
     check_unique(origin.skills.iter().flatten().map(|skill| &skill.name))
+}
+
+fn check_destination_of_skills(item: &SkillsV2) -> Result<(), ValidationError> {
+    check_one_destination(item.clients.as_ref(), item.targets.as_ref())
+}
+
+fn check_one_destination(
+    clients: Option<&ClientList>,
+    targets: Option<&Vec<PathBuf>>,
+) -> Result<(), ValidationError> {
+    if clients.is_some() && targets.is_some() {
+        return Err(named_error(
+            "targets",
+            "an entry takes either `clients` or `targets`, not both: `targets` names the directories themselves",
+        ));
+    }
+    Ok(())
 }
 
 fn check_one_kind(

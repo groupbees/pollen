@@ -1,11 +1,11 @@
 //! The whole pipeline against a real git repository and a real target
 //! directory: config, fetch, discovery, install, prune.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use pollen::command::update::{Action, Report, update};
-use pollen::config::Config;
+use pollen::config::{Config, Destination, Scope};
 use pollen::source::Fetcher;
 use pollen::source::well_known::CredentialsFile;
 use pollen::state::State;
@@ -20,6 +20,23 @@ fn fetcher_for(config: &Config, cache: &Path, offline: bool) -> Fetcher {
             required: false,
         },
     )
+}
+
+/// A run with `--target` set to `target`.
+fn into(target: &Path) -> Scope {
+    Scope {
+        cli: Destination::Targets(vec![target.to_path_buf()]),
+        root: PathBuf::new(),
+    }
+}
+
+/// A run with neither `--target` nor `--client`, with the client
+/// directories under `root` as if it were the working directory.
+fn plain(root: &Path) -> Scope {
+    Scope {
+        cli: Destination::Default,
+        root: root.to_path_buf(),
+    }
 }
 
 #[tokio::test]
@@ -64,16 +81,9 @@ async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
     let target = workspace.path().join("deployed");
     let fetcher = fetcher_for(&config, cache.path(), false);
 
-    let report = update(
-        &config,
-        std::slice::from_ref(&target),
-        &fetcher,
-        false,
-        false,
-        false,
-    )
-    .await
-    .unwrap();
+    let report = update(&config, &into(&target), &fetcher, false, false, false)
+        .await
+        .unwrap();
 
     let mut installed: Vec<_> = report.summaries[0]
         .changes
@@ -96,16 +106,9 @@ async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
     assert_eq!(state.skills["from-local"].repo, "local");
 
     let offline = fetcher_for(&config, cache.path(), true);
-    let second: Report = update(
-        &config,
-        std::slice::from_ref(&target),
-        &offline,
-        false,
-        false,
-        false,
-    )
-    .await
-    .unwrap();
+    let second: Report = update(&config, &into(&target), &offline, false, false, false)
+        .await
+        .unwrap();
     assert_eq!(second.count(Action::Unchanged), 2);
 }
 
@@ -142,7 +145,7 @@ async fn a_migrated_config_deploys_what_its_version_one_did() {
     let v1 = Config::load(&config_path).unwrap();
     let first = update(
         &v1,
-        std::slice::from_ref(&target),
+        &into(&target),
         &fetcher_for(&v1, cache.path(), false),
         false,
         false,
@@ -166,7 +169,7 @@ async fn a_migrated_config_deploys_what_its_version_one_did() {
     let v2 = Config::load(&config_path).unwrap();
     let second = update(
         &v2,
-        std::slice::from_ref(&target),
+        &into(&target),
         &fetcher_for(&v2, cache.path(), true),
         false,
         false,
@@ -205,16 +208,9 @@ async fn a_moved_tag_reinstalls_the_skill() {
     let target = workspace.path().join("deployed");
     let fetcher = fetcher_for(&config, cache.path(), false);
 
-    update(
-        &config,
-        std::slice::from_ref(&target),
-        &fetcher,
-        false,
-        false,
-        false,
-    )
-    .await
-    .unwrap();
+    update(&config, &into(&target), &fetcher, false, false, false)
+        .await
+        .unwrap();
 
     std::fs::write(
         origin.path().join("skills/demo/SKILL.md"),
@@ -224,16 +220,9 @@ async fn a_moved_tag_reinstalls_the_skill() {
     git(origin.path(), &["add", "."]);
     git(origin.path(), &["commit", "--quiet", "--message", "update"]);
 
-    let report = update(
-        &config,
-        std::slice::from_ref(&target),
-        &fetcher,
-        false,
-        false,
-        false,
-    )
-    .await
-    .unwrap();
+    let report = update(&config, &into(&target), &fetcher, false, false, false)
+        .await
+        .unwrap();
 
     assert_eq!(report.count(Action::Updated), 1);
     assert!(
@@ -241,6 +230,209 @@ async fn a_moved_tag_reinstalls_the_skill() {
             .unwrap()
             .contains("Now with more demo.")
     );
+}
+
+mod destinations {
+    use std::path::{Path, PathBuf};
+
+    use pollen::command::update::{Action, Report, update};
+    use pollen::config::Config;
+    use pollen::source::Fetcher;
+    use pollen::state::State;
+
+    use super::{fetcher_for, into, plain, write_skill};
+
+    /// A workspace holding the skills `alpha` and `beta` under `skills/`, and
+    /// a cache.
+    struct Workspace {
+        root: tempfile::TempDir,
+        cache: tempfile::TempDir,
+    }
+
+    impl Workspace {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            for name in ["alpha", "beta"] {
+                write_skill(&root.path().join("skills").join(name), name);
+            }
+            Self {
+                root,
+                cache: tempfile::tempdir().unwrap(),
+            }
+        }
+
+        fn path(&self, relative: &str) -> PathBuf {
+            self.root.path().join(relative)
+        }
+
+        /// Write `pollen.yaml` in version 2 with `body` after `version: 2`.
+        fn config(&self, body: &str) -> Config {
+            let path = self.path("pollen.yaml");
+            std::fs::write(&path, format!("version: 2\n{body}")).unwrap();
+            Config::load(&path).unwrap()
+        }
+
+        fn fetcher(&self, config: &Config) -> Fetcher {
+            fetcher_for(config, self.cache.path(), true)
+        }
+
+        async fn update(&self, config: &Config) -> Report {
+            update(
+                config,
+                &plain(self.root.path()),
+                &self.fetcher(config),
+                false,
+                false,
+                false,
+            )
+            .await
+            .unwrap()
+        }
+
+        fn names(&self, dir: &str) -> Vec<String> {
+            State::load(&self.path(dir))
+                .unwrap()
+                .skills
+                .into_keys()
+                .collect()
+        }
+    }
+
+    fn visited(report: &Report) -> Vec<PathBuf> {
+        report
+            .summaries
+            .iter()
+            .map(|summary| summary.target.clone())
+            .collect()
+    }
+
+    fn skills(path: &str, destination: &str) -> String {
+        format!("repos:\n  - repo: local\n    skills:\n      - path: {path}\n{destination}")
+    }
+
+    #[tokio::test]
+    async fn an_entry_with_its_own_targets_deploys_only_there() {
+        let workspace = Workspace::new();
+        let out = workspace.path("out");
+        let config = workspace.config(&format!(
+            "{}      - path: skills/beta\n",
+            skills(
+                "skills/alpha",
+                &format!("        targets: ['{}']\n", out.display())
+            )
+        ));
+
+        let report = workspace.update(&config).await;
+
+        assert_eq!(
+            visited(&report),
+            [
+                out.clone(),
+                workspace.path(".claude/skills"),
+                workspace.path(".agents/skills")
+            ]
+        );
+        assert_eq!(workspace.names("out"), ["alpha"]);
+        assert_eq!(workspace.names(".claude/skills"), ["beta"]);
+        assert_eq!(workspace.names(".agents/skills"), ["beta"]);
+        assert!(out.join("alpha/SKILL.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn an_entry_with_its_own_clients_deploys_into_their_directories() {
+        let workspace = Workspace::new();
+        let config = workspace.config(&format!(
+            "clients: claude-code\n{}      - path: skills/beta\n",
+            skills("skills/alpha", "        clients: [opencode]\n")
+        ));
+
+        let report = workspace.update(&config).await;
+
+        assert_eq!(
+            visited(&report),
+            [
+                workspace.path(".agents/skills"),
+                workspace.path(".claude/skills")
+            ]
+        );
+        assert_eq!(workspace.names(".agents/skills"), ["alpha"]);
+        assert_eq!(workspace.names(".claude/skills"), ["beta"]);
+    }
+
+    #[tokio::test]
+    async fn moving_an_entry_to_targets_removes_it_from_the_client_directories() {
+        let workspace = Workspace::new();
+        let out = workspace.path("out");
+        let before = workspace.config(&format!(
+            "{}      - path: skills/beta\n",
+            skills("skills/alpha", "")
+        ));
+        workspace.update(&before).await;
+        assert_eq!(workspace.names(".claude/skills"), ["alpha", "beta"]);
+
+        let after = workspace.config(&format!(
+            "{}      - path: skills/beta\n",
+            skills(
+                "skills/alpha",
+                &format!("        targets: ['{}']\n", out.display())
+            )
+        ));
+        let report = workspace.update(&after).await;
+
+        assert_eq!(report.count(Action::Removed), 2);
+        assert_eq!(workspace.names(".claude/skills"), ["beta"]);
+        assert_eq!(workspace.names(".agents/skills"), ["beta"]);
+        assert!(!workspace.path(".claude/skills/alpha").exists());
+        assert!(out.join("alpha/SKILL.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn dropping_a_client_prunes_its_directory() {
+        let workspace = Workspace::new();
+        let body = skills("skills", "");
+        workspace.update(&workspace.config(&body)).await;
+        assert_eq!(workspace.names(".agents/skills"), ["alpha", "beta"]);
+
+        let report = workspace
+            .update(&workspace.config(&format!("clients: claude-code\n{body}")))
+            .await;
+
+        assert_eq!(
+            visited(&report),
+            [
+                workspace.path(".claude/skills"),
+                workspace.path(".agents/skills")
+            ]
+        );
+        assert_eq!(report.summaries[1].count(Action::Removed), 2);
+        assert!(!workspace.path(".agents/skills").exists());
+        assert_eq!(workspace.names(".claude/skills"), ["alpha", "beta"]);
+    }
+
+    #[tokio::test]
+    async fn a_target_run_visits_nothing_else() {
+        let workspace = Workspace::new();
+        let config = workspace.config(&skills("skills", ""));
+        workspace.update(&config).await;
+        let scratch = workspace.path("scratch");
+
+        let report = update(
+            &config,
+            &into(&scratch),
+            &workspace.fetcher(&config),
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(visited(&report), [scratch]);
+        assert_eq!(report.count(Action::Removed), 0);
+        assert_eq!(workspace.names(".claude/skills"), ["alpha", "beta"]);
+        assert_eq!(workspace.names(".agents/skills"), ["alpha", "beta"]);
+        assert!(Path::new(&workspace.path("scratch/alpha/SKILL.md")).is_file());
+    }
 }
 
 fn write_skill(dir: &Path, name: &str) {

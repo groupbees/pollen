@@ -1,11 +1,11 @@
 //! Turning the config into the list of skills that should be deployed.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::config::Config;
+use crate::config::{Config, Destination, Repo, Scope, directory_key};
 use crate::skill;
 use crate::source::{Materializer, relative_slug};
 use crate::{deploy, discovery};
@@ -42,16 +42,43 @@ impl Planned {
     }
 }
 
+/// The skills planned for one directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    /// The directory, as resolved for this run.
+    pub dir: PathBuf,
+    /// The skills deployed into it, ordered by name.
+    pub skills: Vec<Planned>,
+}
+
 /// The outcome of walking every source the config declares.
 #[derive(Debug, Default)]
 pub struct Plan {
-    /// The skills that passed validation, keyed by name and ordered by it.
+    /// Every skill that passed validation, each once however many
+    /// directories it goes to, ordered by name.
     pub skills: Vec<Planned>,
+    /// The directories something is planned for, in the order they are
+    /// first named.
+    pub targets: Vec<Target>,
     /// Skills that were found but rejected, one message each.
     pub problems: Vec<String>,
 }
 
-/// Materialize every source and collect the skills its paths select.
+impl Plan {
+    /// The skills planned for `dir`, empty when none is.
+    #[must_use]
+    pub fn skills_for(&self, dir: &Path) -> &[Planned] {
+        let key = directory_key(dir);
+        self.targets
+            .iter()
+            .find(|target| directory_key(&target.dir) == key)
+            .map_or(&[], |target| &target.skills)
+    }
+}
+
+/// Materialize every source and collect the skills its paths select, each
+/// planned for the directories its entry's destination resolves to in
+/// `scope`.
 ///
 /// With `allow_hidden_characters`, a skill holding invisible characters is
 /// selected, with a warning, rather than reported as a problem.
@@ -59,13 +86,15 @@ pub struct Plan {
 /// # Errors
 ///
 /// When a source cannot be fetched, a declared path is missing, or two
-/// sources provide the same skill name.
+/// sources send the same skill name to one directory.
 pub async fn build(
     config: &Config,
+    scope: &Scope,
     materializer: &impl Materializer,
     allow_hidden_characters: bool,
 ) -> Result<Plan> {
-    let mut skills: BTreeMap<String, Planned> = BTreeMap::new();
+    let mut targets: Vec<(PathBuf, BTreeMap<String, Planned>)> = Vec::new();
+    let mut skills = Vec::new();
     let mut problems = Vec::new();
 
     for repo in &config.repos {
@@ -81,25 +110,25 @@ pub async fn build(
 
         // A `well-known` source selects its skills itself, by name; the
         // others select them under `paths:`.
-        let mut candidates: Vec<(PathBuf, String, Option<String>)> = fetched
-            .skills
-            .iter()
-            .map(|skill| {
+        let mut candidates: Vec<(PathBuf, String, Option<String>, &Destination)> = Vec::new();
+        if let Repo::WellKnown { destination, .. } = repo {
+            candidates.extend(fetched.skills.iter().map(|skill| {
                 (
                     skill.dir.clone(),
                     skill.name.clone(),
                     Some(skill.digest.clone()),
+                    destination,
                 )
-            })
-            .collect();
-        for spec in repo.paths() {
-            for dir in discovery::discover(&root, spec)? {
+            }));
+        }
+        for selection in repo.paths() {
+            for dir in discovery::discover(&root, &selection.spec)? {
                 let source_path = relative_slug(&root, &dir);
-                candidates.push((dir, source_path, None));
+                candidates.push((dir, source_path, None, &selection.destination));
             }
         }
 
-        for (dir, source_path, digest) in candidates {
+        for (dir, source_path, digest, destination) in candidates {
             let frontmatter = match skill::load(&dir, allow_hidden_characters) {
                 Ok(frontmatter) => frontmatter,
                 Err(error) => {
@@ -119,21 +148,48 @@ pub async fn build(
                 digest,
             };
 
-            if let Some(existing) = skills.get(&planned.name) {
-                bail!(
-                    "two sources provide the skill `{}`: {} and {}",
-                    planned.name,
-                    existing.origin(),
-                    planned.origin()
-                );
+            for target in config.directories(destination, scope) {
+                let key = directory_key(&target);
+                let index = if let Some(index) = targets
+                    .iter()
+                    .position(|(dir, _)| directory_key(dir) == key)
+                {
+                    index
+                } else {
+                    targets.push((target, BTreeMap::new()));
+                    targets.len() - 1
+                };
+                let (target, planned_there) = &mut targets[index];
+                if let Some(existing) = planned_there.get(&planned.name) {
+                    bail!(
+                        "two sources provide the skill `{}` in {}: {} and {}",
+                        planned.name,
+                        target.display(),
+                        existing.origin(),
+                        planned.origin()
+                    );
+                }
+                tracing::debug!(skill = %planned.name, origin = %planned.origin(), target = %target.display(), "selected");
+                planned_there.insert(planned.name.clone(), planned.clone());
             }
-            tracing::debug!(skill = %planned.name, origin = %planned.origin(), "selected");
-            skills.insert(planned.name.clone(), planned);
+            skills.push(planned);
         }
     }
 
+    skills.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then_with(|| a.origin().cmp(&b.origin()))
+    });
     Ok(Plan {
-        skills: skills.into_values().collect(),
+        skills,
+        targets: targets
+            .into_iter()
+            .map(|(dir, skills)| Target {
+                dir,
+                skills: skills.into_values().collect(),
+            })
+            .collect(),
         problems,
     })
 }

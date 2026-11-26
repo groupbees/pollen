@@ -22,7 +22,11 @@ pub(crate) fn entries(lines: &[&str]) -> Vec<(usize, usize)> {
 pub(crate) fn entries_of(lines: &[&str], key: &str) -> Vec<(usize, usize)> {
     lines
         .iter()
-        .position(|line| line.trim_end().starts_with(key))
+        .position(|line| {
+            line.trim_start_matches('\u{feff}')
+                .trim_end()
+                .starts_with(key)
+        })
         .map_or_else(Vec::new, |header| items(lines, header, lines.len(), 0))
 }
 

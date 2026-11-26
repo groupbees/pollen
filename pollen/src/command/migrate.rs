@@ -5,7 +5,7 @@ use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use regex::Regex;
 
 use crate::cli::Options;
-use crate::command::yaml_lines::{entries, stage};
+use crate::command::yaml_lines::{entries, items, stage};
 use crate::config::{self, Config, LATEST};
 
 /// What a migration changed, or would change.
@@ -40,8 +40,8 @@ pub fn run(options: &Options, dry_run: bool) -> Result<()> {
 /// `dry_run`.
 ///
 /// The file is edited line by line, so its comments and layout survive, and
-/// written only if the result declares the same sources and targets as the
-/// original.
+/// written only if the result declares the same sources and destinations as
+/// the original.
 ///
 /// # Errors
 ///
@@ -65,8 +65,8 @@ pub fn apply(options: &Options, dry_run: bool) -> Result<Migration> {
     let migrated = to_v2(&text)?;
     let staged = stage(&path, &migrated)?;
     ensure!(
-        staged.config.repos == original.repos && staged.config.targets == original.targets,
-        "the migrated config would declare other sources than {}; nothing was written",
+        staged.config.repos == original.repos && staged.config.clients == original.clients,
+        "the migrated config would declare other sources or destinations than {}; nothing was written",
         path.display()
     );
     if !dry_run {
@@ -91,8 +91,12 @@ static REPOS_KEY_IN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^repos:").expect("valid regex"));
 static VERSION_LINE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^version:\s*[^#\s]+(.*)$").expect("valid regex"));
+static TARGETS_LINE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^targets:").expect("valid regex"));
 
-/// The text of a version 1 `pollen.yaml`, said in version 2: `paths:` becomes
+/// The text of a version 1 `pollen.yaml`, said in version 2: the top-level
+/// `targets:` block, with the comments right above it, goes on every item of
+/// a `repo`'s `paths:` and on every `well-known` entry, `paths:` becomes
 /// `skills:` in every `repo` entry, every `well-known` entry moves, with the
 /// comments right above it, to a `discovery:` list after `repos:` and calls
 /// its origin `url:`, and `version: 2` is set.
@@ -101,11 +105,12 @@ static VERSION_LINE: LazyLock<Regex> =
 ///
 /// When an entry's keys or the place for `version` cannot be found.
 pub fn to_v2(text: &str) -> Result<String> {
+    let text = &move_targets(text)?;
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let mut out: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
     let by_hand = || {
         anyhow!(
-            "cannot find the keys of every `repos` entry, e.g. in YAML flow style; migrate by hand: rename each `paths:` to `skills:`, move each `well-known:` entry under `discovery:` as `url:`, and add `version: {LATEST}`"
+            "cannot find the keys of every `repos` entry, e.g. in YAML flow style; migrate by hand: {BY_HAND}"
         )
     };
 
@@ -136,6 +141,150 @@ pub fn to_v2(text: &str) -> Result<String> {
         out = to_discovery(&lines, out, &entries, &moved)?;
     }
     Ok(out.concat())
+}
+
+/// The steps of a migration, for an error asking to do it by hand.
+const BY_HAND: &str = "copy the top-level `targets:` into each item of `paths:` and each `well-known:` entry, rename each `paths:` to `skills:`, move each `well-known:` entry under `discovery:` as `url:`, and add `version: 2`";
+
+/// Remove the top-level `targets:` block, with the comments right above it
+/// unless they open the file, and write a copy of it as the last key of every
+/// item of a `repo`'s `paths:` and of every `well-known` entry, since version
+/// 2 names the destination on each entry.
+fn move_targets(text: &str) -> Result<String> {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let Some((start, end)) = targets_block(&lines) else {
+        return Ok(text.to_owned());
+    };
+    let ending = if lines[0].ends_with("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let block: Vec<String> = lines[start..end]
+        .iter()
+        .map(|line| {
+            let line = line.trim_start_matches('\u{feff}');
+            if line.ends_with('\n') {
+                line.to_owned()
+            } else {
+                format!("{line}{ending}")
+            }
+        })
+        .collect();
+    let indented = |column: usize| -> String {
+        block
+            .iter()
+            .map(|line| {
+                if line.trim().is_empty() {
+                    line.clone()
+                } else {
+                    format!("{}{line}", " ".repeat(column))
+                }
+            })
+            .collect()
+    };
+
+    let places = destination_places(&lines)?;
+    let mut out: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
+    for line in &mut out[start..end] {
+        line.clear();
+    }
+    if lines[start].starts_with('\u{feff}') {
+        out[start].push('\u{feff}');
+    }
+    // The blank line that set the block apart goes with it, unless the
+    // block was between two paragraphs.
+    let blank = |index: usize| lines.get(index).is_none_or(|line| line.trim().is_empty());
+    if start > 0 && blank(start - 1) && blank(end) {
+        out[start - 1].clear();
+    }
+    for (at, column) in places {
+        if !out[at].ends_with('\n') {
+            out[at].push_str(ending);
+        }
+        out[at].push_str(&indented(column));
+    }
+    Ok(out.concat())
+}
+
+/// The `[start, end)` lines of the top-level `targets:` block, with the
+/// comments right above it unless they open the file.
+fn targets_block(lines: &[&str]) -> Option<(usize, usize)> {
+    let key = lines
+        .iter()
+        .position(|line| TARGETS_LINE.is_match(line.trim_start_matches('\u{feff}')))?;
+    let mut end = key + 1;
+    for (index, line) in lines.iter().enumerate().skip(key + 1) {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if !line.starts_with([' ', '\t', '-']) {
+            break;
+        }
+        end = index + 1;
+    }
+    let mut start = key;
+    while start > 0 && lines[start - 1].starts_with('#') {
+        start -= 1;
+    }
+    Some((if start == 0 { key } else { start }, end))
+}
+
+/// Where each entry's destination goes, as a line to write after and a
+/// column: after the last line of each item of a `repo`'s `paths:` and of
+/// each `well-known` entry that is neither blank nor a comment, at the
+/// column of that item's keys.
+fn destination_places(lines: &[&str]) -> Result<Vec<(usize, usize)>> {
+    let by_hand = || {
+        anyhow!(
+            "cannot find where each entry's keys go, e.g. in YAML flow style; migrate by hand: {BY_HAND}"
+        )
+    };
+    let last_content = |from: usize, to: usize| {
+        (from..to).rev().find(|&index| {
+            let trimmed = lines[index].trim();
+            !trimmed.is_empty() && !trimmed.starts_with('#')
+        })
+    };
+    let entries = entries(lines);
+    if entries.is_empty() {
+        return Err(by_hand());
+    }
+    let mut places = Vec::new();
+    for (first, last) in entries {
+        if !lines[first..last]
+            .iter()
+            .any(|line| REPO_KEY.is_match(line))
+        {
+            let at = last_content(first, last).ok_or_else(by_hand)?;
+            places.push((at, key_column(lines[first])));
+            continue;
+        }
+        let (header, column) = (first..last)
+            .find_map(|index| {
+                PATHS_LINE
+                    .captures(lines[index])
+                    .map(|caps| (index, caps[1].len()))
+            })
+            .ok_or_else(by_hand)?;
+        let paths = items(lines, header, last, column);
+        if paths.is_empty() {
+            return Err(by_hand());
+        }
+        for (from, to) in paths {
+            let at = last_content(from, to).ok_or_else(by_hand)?;
+            places.push((at, key_column(lines[from])));
+        }
+    }
+    Ok(places)
+}
+
+/// The column of the keys of the list item starting on `line`: just after
+/// its `- `.
+fn key_column(line: &str) -> usize {
+    let dash = line.find('-').unwrap_or(0);
+    let after = &line[dash + 1..];
+    dash + 1 + after.len() - after.trim_start().len()
 }
 
 /// Move the `repos` entries `moved` marks under a `discovery:` key after
@@ -278,7 +427,7 @@ mod tests {
 
         assert_eq!(
             to_v2(text).unwrap(),
-            "# yaml-language-server: $schema=./schema.json\n# Skills.\nversion: 2\ntargets:\n  - .claude/skills\nrepos:\n  # The team's.\n  - repo: https://x.example/a.git\n    revision: v1.0.0  # pinned\n    skills:  # where\n      - path: skills\n        recurse: true\n  - skills:\n      - path: local-skills\n    repo: local\ndiscovery:\n  - url: https://x.example\n    skills:\n      - name: a\n"
+            "# yaml-language-server: $schema=./schema.json\n# Skills.\nversion: 2\nrepos:\n  # The team's.\n  - repo: https://x.example/a.git\n    revision: v1.0.0  # pinned\n    skills:  # where\n      - path: skills\n        recurse: true\n        targets:\n          - .claude/skills\n  - skills:\n      - path: local-skills\n        targets:\n          - .claude/skills\n    repo: local\ndiscovery:\n  - url: https://x.example\n    skills:\n      - name: a\n    targets:\n      - .claude/skills\n"
         );
     }
 
@@ -288,7 +437,7 @@ mod tests {
 
         assert_eq!(
             to_v2(text).unwrap(),
-            "version: 2\nrepos:  # sources\n  # Ours.\n  - repo: local\n    skills:\n      - path: .\n\ndiscovery:\n  # A gateway.\n  - url: https://g.example  # SSO\n    exclude: ^beta-\n\n  - skills:\n      - name: a\n    url: https://h.example\n\ntargets:\n  - out\n"
+            "version: 2\nrepos:  # sources\n  # Ours.\n  - repo: local\n    skills:\n      - path: .\n        targets:\n          - out\n\ndiscovery:\n  # A gateway.\n  - url: https://g.example  # SSO\n    exclude: ^beta-\n    targets:\n      - out\n\n  - skills:\n      - name: a\n    url: https://h.example\n    targets:\n      - out\n"
         );
     }
 
@@ -319,8 +468,63 @@ mod tests {
     #[test]
     fn goes_above_the_comments_that_describe_the_first_key() {
         assert_eq!(
-            to_v2("# A config.\n\n# Where they go.\ntargets:\n  - out\nrepos:\n  - repo: local\n    paths:\n      - path: .\n").unwrap(),
-            "# A config.\n\nversion: 2\n\n# Where they go.\ntargets:\n  - out\nrepos:\n  - repo: local\n    skills:\n      - path: .\n"
+            to_v2("# A config.\n\n# Where they come from.\nrepos:\n  - repo: local\n    paths:\n      - path: .\n").unwrap(),
+            "# A config.\n\nversion: 2\n\n# Where they come from.\nrepos:\n  - repo: local\n    skills:\n      - path: .\n"
+        );
+    }
+
+    #[test]
+    fn moves_the_targets_with_their_comments_onto_every_entry() {
+        assert_eq!(
+            to_v2("# A config.\n\n# Where they go.\ntargets:  # both\n- out  # ours\n# and theirs\n- ~/shared\n\nrepos:\n- repo: local\n  paths:\n  - path: a\n    recurse: true\n  # The second.\n  - path: b\n- well-known: https://g.example\n").unwrap(),
+            "# A config.\n\nversion: 2\n\nrepos:\n- repo: local\n  skills:\n  - path: a\n    recurse: true\n    # Where they go.\n    targets:  # both\n    - out  # ours\n    # and theirs\n    - ~/shared\n  # The second.\n  - path: b\n    # Where they go.\n    targets:  # both\n    - out  # ours\n    # and theirs\n    - ~/shared\ndiscovery:\n- url: https://g.example\n  # Where they go.\n  targets:  # both\n  - out  # ours\n  # and theirs\n  - ~/shared\n"
+        );
+    }
+
+    #[test]
+    fn moves_flow_style_targets_and_keeps_line_endings() {
+        assert_eq!(
+            to_v2("repos:\r\n  - repo: local\r\n    paths:\r\n      - path: .\r\n\r\ntargets: [out, other]\r\n").unwrap(),
+            "version: 2\r\nrepos:\r\n  - repo: local\r\n    skills:\r\n      - path: .\r\n        targets: [out, other]\r\n"
+        );
+        assert_eq!(
+            to_v2("\u{feff}targets: [out]\nrepos:\n  - repo: local\n    paths:\n      - path: .")
+                .unwrap(),
+            "\u{feff}version: 2\nrepos:\n  - repo: local\n    skills:\n      - path: .\n        targets: [out]\n"
+        );
+    }
+
+    #[test]
+    fn refuses_targets_it_cannot_place() {
+        let error = to_v2("targets: [out]\nrepos:\n  - repo: local\n    paths: [{path: .}]\n")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("by hand"), "{error}");
+    }
+
+    #[test]
+    fn migrates_targets_to_a_config_with_the_same_destinations() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pollen.yaml");
+        std::fs::write(
+            &path,
+            "targets:\n  - out\n  - ~/shared\nrepos:\n  - repo: local\n    paths:\n      - path: a\n      - path: b\n  - well-known: https://g.example\n    skills:\n      - name: x\n",
+        )
+        .unwrap();
+        let before = Config::load(&path).unwrap();
+
+        apply(&options(&path), false).unwrap();
+        let after = Config::load(&path).unwrap();
+
+        assert_eq!(after.version, 2);
+        assert_eq!(after.repos, before.repos);
+        assert!(
+            after
+                .repos
+                .iter()
+                .flat_map(crate::config::Repo::destinations)
+                .all(|destination| matches!(destination, crate::config::Destination::Targets(dirs) if dirs.len() == 2))
         );
     }
 

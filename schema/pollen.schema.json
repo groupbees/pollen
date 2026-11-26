@@ -39,14 +39,37 @@
     },
     "DiscoveryV2": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "required": [
+              "exclude",
+              "skills"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "clients",
+              "targets"
+            ]
+          }
+        }
+      ],
       "description": "An origin serving an Agent Skills discovery index, in version 2.",
-      "not": {
-        "required": [
-          "exclude",
-          "skills"
-        ]
-      },
       "properties": {
+        "clients": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The clients these skills are deployed for, one or a list, instead of\nthe top-level `clients`. Not with `targets`."
+        },
         "exclude": {
           "description": "Regular expression rejecting the skills of the index whose name\nmatches. Only with every skill of the index, not with `skills`.",
           "format": "regex",
@@ -59,6 +82,17 @@
           "description": "The skills to take from the index, instead of all of them.",
           "items": {
             "$ref": "#/$defs/SkillPin"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "targets": {
+          "description": "Directories these skills are deployed into, each getting a full copy,\ninstead of the skill directories of any client. Not with `clients`.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded.",
+          "items": {
+            "type": "string"
           },
           "minItems": 1,
           "type": [
@@ -244,7 +278,7 @@
         "skills": {
           "description": "Where to look for skills inside the source.",
           "items": {
-            "$ref": "#/$defs/PathSpec"
+            "$ref": "#/$defs/SkillsV2"
           },
           "minItems": 1,
           "type": "array"
@@ -283,6 +317,61 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "SkillsV2": {
+      "additionalProperties": false,
+      "description": "One place to look for skills inside a git or `local` source, in version\n2, and where the skills it selects go.",
+      "not": {
+        "required": [
+          "clients",
+          "targets"
+        ]
+      },
+      "properties": {
+        "clients": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The clients these skills are deployed for, one or a list, instead of\nthe top-level `clients`. Not with `targets`."
+        },
+        "exclude": {
+          "description": "Regular expression rejecting skills whose path under `path` matches.",
+          "format": "regex",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Directory to search, relative to the source root.\n\nA directory holding a `SKILL.md` is itself the skill; otherwise its\nsubdirectories are searched.",
+          "type": "string"
+        },
+        "recurse": {
+          "default": false,
+          "description": "Search the whole subtree rather than only the immediate children.",
+          "type": "boolean"
+        },
+        "targets": {
+          "description": "Directories these skills are deployed into, each getting a full copy,\ninstead of the skill directories of any client. Not with `clients`.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
       ],
       "type": "object"
     },
@@ -351,7 +440,7 @@
               "type": "null"
             }
           ],
-          "description": "The clients pollen deploys for, one or a list: `all`, `claude-code`\n(skills in `.claude/skills`) or `opencode` (skills in\n`.agents/skills`).\n\nThe directories are under the home directory with `--global`;\n`targets` replaces their skill directories. Defaults to `all`."
+          "description": "The clients an entry naming neither `clients` nor `targets` deploys\nfor, one or a list: `all`, `claude-code` (skills in `.claude/skills`)\nor `opencode` (skills in `.agents/skills`).\n\nThe directories are under the home directory with `--global`.\nDefaults to `all`."
         },
         "discovery": {
           "description": "The origins serving an Agent Skills discovery index to pull skills\nfrom.",
@@ -368,17 +457,6 @@
           "description": "The git repositories, and the config file's own directory, to pull\nskills from.",
           "items": {
             "$ref": "#/$defs/RepoV2"
-          },
-          "minItems": 1,
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "targets": {
-          "description": "Directories the skills are deployed into, each getting a full copy,\ninstead of the skill directories of the `clients`.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded.",
-          "items": {
-            "type": "string"
           },
           "minItems": 1,
           "type": [

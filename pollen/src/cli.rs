@@ -71,9 +71,10 @@ pub struct Options {
     /// Use the user-level config and deploy into the user's skill directories.
     ///
     /// Reads `$XDG_CONFIG_HOME/pollen/pollen.yaml` (`~/.config/pollen/pollen.yaml`
-    /// when unset, `%APPDATA%\pollen\pollen.yaml` on Windows); when it sets no
-    /// `targets`, its `clients` deploy under the home directory, into
-    /// `~/.claude/skills` and `~/.agents/skills` by default.
+    /// when unset, `%APPDATA%\pollen\pollen.yaml` on Windows); the skill
+    /// directories of its clients are under the home directory, so an entry
+    /// naming no `targets` deploys into `~/.claude/skills` and
+    /// `~/.agents/skills` by default.
     #[arg(
         long,
         short = 'g',
@@ -83,9 +84,10 @@ pub struct Options {
     )]
     pub global: bool,
 
-    /// Directory to deploy into, overriding the config's `targets` and `clients`.
+    /// Directory to deploy into, instead of the destination of every entry.
     ///
-    /// Repeat the flag for several directories. The environment variable
+    /// The run visits no other directory. Repeat the flag for several
+    /// directories. The environment variable
     /// takes a list separated like `PATH`: `;` on Windows, `:` elsewhere.
     #[arg(
         long = "target",
@@ -95,9 +97,10 @@ pub struct Options {
     )]
     pub targets: Vec<PathBuf>,
 
-    /// Client to deploy for, overriding the config's `targets` and `clients`.
+    /// Client to deploy for, instead of the destination of every entry.
     ///
-    /// Repeat the flag for several clients. The environment variable takes a
+    /// The run visits no other directory. Repeat the flag for several
+    /// clients. The environment variable takes a
     /// comma-separated list.
     #[arg(
         long = "client",
@@ -434,7 +437,7 @@ pub enum ConfigCommand {
     /// Rewrite `pollen.yaml` in the newest format version.
     ///
     /// Comments and layout are kept, and the file is written only if it
-    /// declares the same sources and targets as before. A file already in the
+    /// declares the same sources and destinations as before. A file already in the
     /// newest version is left alone.
     Migrate {
         /// Show what would change without writing the file.

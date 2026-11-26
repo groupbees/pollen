@@ -43,7 +43,7 @@ def list_installed(
     cache_dir: StrPath | None = None,
     offline: bool = False,
 ) -> list[Deployed]:
-    """The skills pollen manages in each target directory."""
+    """The skills pollen manages in each directory an update visits."""
 
 def validate(
     *,

@@ -33,7 +33,9 @@ pub fn run(options: &Options) -> Result<()> {
     Ok(())
 }
 
-/// Read what pollen installed in every target directory `options` resolve to.
+/// Read what pollen installed in every directory an update with `options`
+/// visits: those the config's entries deploy into, and the known client
+/// directories whose state file names the config.
 ///
 /// # Errors
 ///
@@ -41,7 +43,7 @@ pub fn run(options: &Options) -> Result<()> {
 pub fn installed(options: &Options) -> Result<Vec<Deployed>> {
     let context = Context::open(options)?;
     context
-        .targets
+        .directories()
         .into_iter()
         .map(|target| {
             let state = State::load(&target)?;

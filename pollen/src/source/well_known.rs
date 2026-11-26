@@ -299,6 +299,7 @@ impl WellKnown {
         let Repo::WellKnown {
             origin,
             skills: selection,
+            ..
         } = repo
         else {
             bail!("{} is not a well-known source", repo.label());
@@ -504,6 +505,7 @@ mod tests {
         Repo::WellKnown {
             origin: origin.to_owned(),
             skills: selection(None, None),
+            destination: crate::config::Destination::Default,
         }
     }
 

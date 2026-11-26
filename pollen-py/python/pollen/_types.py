@@ -35,7 +35,7 @@ class Summary:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Report:
-    """The result of an update, one summary per target directory."""
+    """The result of an update, one summary per directory it visited."""
 
     summaries: list[Summary]
 
