@@ -14,7 +14,7 @@ from pollen._types import (
 )
 
 StrPath: TypeAlias = str | PathLike[str]
-Client: TypeAlias = Literal["claude", "agent-skills", "all"]
+Client: TypeAlias = Literal["claude-code", "opencode", "all"]
 
 class PollenError(Exception):
     """A pollen command failed."""

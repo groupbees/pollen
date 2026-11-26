@@ -125,7 +125,6 @@ pub struct RepoV1 {
 #[schemars(
     title = "pollen configuration, version 2",
     extend(
-        "not" = serde_json::json!({"required": ["targets", "clients"]}),
         "anyOf" = serde_json::json!([{"required": ["repos"]}, {"required": ["discovery"]}])
     )
 )]
@@ -137,16 +136,16 @@ pub struct V2 {
     /// instead of the skill directories of the `clients`.
     ///
     /// A relative path resolves against the working directory, and a leading
-    /// `~` is expanded. Forbidden with `clients`.
+    /// `~` is expanded.
     #[validate(length(min = 1, message = "at least one target is required"))]
     #[schemars(length(min = 1))]
     pub targets: Option<Vec<PathBuf>>,
-    /// The clients the skills are deployed for, each through its own skill
-    /// directory: `all`, `claude` (`.claude/skills`) or `agent-skills`
-    /// (`.agents/skills`), one or a list.
+    /// The clients pollen deploys for, one or a list: `all`, `claude-code`
+    /// (skills in `.claude/skills`) or `opencode` (skills in
+    /// `.agents/skills`).
     ///
-    /// The directories are under the home directory with `--global`.
-    /// Defaults to `all`. Forbidden with `targets`.
+    /// The directories are under the home directory with `--global`;
+    /// `targets` replaces their skill directories. Defaults to `all`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(custom(function = check_clients))]
     pub clients: Option<ClientList>,
@@ -168,7 +167,7 @@ pub struct V2 {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(
     untagged,
-    expecting = "`clients` takes `all`, `claude` or `agent-skills`, or a list of them"
+    expecting = "`clients` takes `all`, `claude-code` or `opencode`, or a list of them"
 )]
 pub enum ClientList {
     /// A single choice.

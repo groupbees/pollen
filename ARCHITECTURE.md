@@ -197,9 +197,18 @@ rather than one vendor's plugin mechanism. Generating a plugin marketplace
 instead would buy namespacing and versioning, and would leave every
 non-Claude client unserved by a tool whose whole premise is a shared format.
 
+**Clients are rows of a table.** A client is named as the product names
+itself (`claude-code`, `opencode`), never after a directory convention, and
+what pollen knows about it is data: its skill directory. There is no adapter
+trait and no client defined in `pollen.yaml`. A client the table does not
+list is served through the directory it reads, `.agents/skills/` for most,
+or through `targets`, which replaces the skill directories of `clients`.
+See [ADR 0004](docs/adr/0004-deploy-agent-definitions-verbatim-per-client.md).
+
 **Two target directories by default, both full copies.** Clients scan their
 own directory plus `.agents/skills/`, and no single path reaches all of them,
-so the default writes `.claude/skills/` and `.agents/skills/` rather than
+so the default, every client pollen knows, writes `.claude/skills/` for
+Claude Code and `.agents/skills/` for OpenCode and the others rather than
 asking the user which agent they use. Copies rather than symlinks, because a
 symlink only works where the client resolves one and the two targets need not
 share an ancestor. Detecting which agents are installed and targeting those

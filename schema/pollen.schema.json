@@ -4,13 +4,13 @@
       "description": "A client named in the config or on the command line: one client, or all\nof them.",
       "oneOf": [
         {
-          "const": "claude",
+          "const": "claude-code",
           "description": "Claude Code, into `.claude/skills`.",
           "type": "string"
         },
         {
-          "const": "agent-skills",
-          "description": "Every other Agent Skills client, into `.agents/skills`.",
+          "const": "opencode",
+          "description": "OpenCode, into `.agents/skills`.",
           "type": "string"
         },
         {
@@ -341,12 +341,6 @@
         }
       ],
       "description": "A `pollen.yaml` in format version 2: a `repo` lists where to look under\n`skills`, and the origins serving a discovery index have a list of their\nown, `discovery`.",
-      "not": {
-        "required": [
-          "targets",
-          "clients"
-        ]
-      },
       "properties": {
         "clients": {
           "anyOf": [
@@ -357,7 +351,7 @@
               "type": "null"
             }
           ],
-          "description": "The clients the skills are deployed for, each through its own skill\ndirectory: `all`, `claude` (`.claude/skills`) or `agent-skills`\n(`.agents/skills`), one or a list.\n\nThe directories are under the home directory with `--global`.\nDefaults to `all`. Forbidden with `targets`."
+          "description": "The clients pollen deploys for, one or a list: `all`, `claude-code`\n(skills in `.claude/skills`) or `opencode` (skills in\n`.agents/skills`).\n\nThe directories are under the home directory with `--global`;\n`targets` replaces their skill directories. Defaults to `all`."
         },
         "discovery": {
           "description": "The origins serving an Agent Skills discovery index to pull skills\nfrom.",
@@ -382,7 +376,7 @@
           ]
         },
         "targets": {
-          "description": "Directories the skills are deployed into, each getting a full copy,\ninstead of the skill directories of the `clients`.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded. Forbidden with `clients`.",
+          "description": "Directories the skills are deployed into, each getting a full copy,\ninstead of the skill directories of the `clients`.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded.",
           "items": {
             "type": "string"
           },

@@ -58,7 +58,7 @@ def test_targets_override_the_config(workspace: Path, tmp_path: Path, cache_dir:
 
 
 def test_clients_override_the_config(workspace: Path, cache_dir: Path) -> None:
-    report = pollen.update(cache_dir=cache_dir, clients=["agent-skills"])
+    report = pollen.update(cache_dir=cache_dir, clients=["opencode"])
 
     assert [summary.target for summary in report.summaries] == [Path(".agents/skills")]
     assert (workspace / ".agents" / "skills" / "gamma" / "SKILL.md").is_file()
@@ -69,7 +69,7 @@ def test_rejects_an_unknown_client_and_clients_with_targets(cache_dir: Path) -> 
         # The invalid client is the point: the stubs rightly reject it.
         pollen.update(cache_dir=cache_dir, clients=["cursor"])  # pyright: ignore[reportArgumentType]
     with pytest.raises(ValueError, match="mutually exclusive"):
-        pollen.update(cache_dir=cache_dir, targets=["skills"], clients=["claude"])
+        pollen.update(cache_dir=cache_dir, targets=["skills"], clients=["claude-code"])
 
 
 def test_list_installed_reads_what_update_recorded(workspace: Path, cache_dir: Path) -> None:

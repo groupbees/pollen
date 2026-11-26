@@ -24,14 +24,13 @@ pub use raw::{LATEST, PathSpec, SkillPin};
 /// The sentinel `repo:` value meaning "paths are relative to this config file".
 pub const LOCAL_REPO: &str = "local";
 
-/// An Agent Skills client pollen deploys for.
+/// A client pollen deploys for, named as the product names itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Client {
     /// Claude Code.
-    Claude,
-    /// Every other Agent Skills client, through the cross-client convention
-    /// they all scan.
-    AgentSkills,
+    ClaudeCode,
+    /// OpenCode.
+    OpenCode,
 }
 
 /// Where a client reads what pollen deploys, relative to the working
@@ -48,9 +47,10 @@ pub struct ClientSpec {
 #[serde(rename_all = "kebab-case")]
 pub enum ClientChoice {
     /// Claude Code, into `.claude/skills`.
-    Claude,
-    /// Every other Agent Skills client, into `.agents/skills`.
-    AgentSkills,
+    ClaudeCode,
+    /// OpenCode, into `.agents/skills`.
+    #[serde(rename = "opencode")]
+    OpenCode,
     /// Every client pollen knows.
     All,
 }
@@ -193,20 +193,20 @@ impl Config {
 
 impl Client {
     /// Every client pollen knows, in deployment order.
-    pub const ALL: [Self; 2] = [Self::Claude, Self::AgentSkills];
+    pub const ALL: [Self; 2] = [Self::ClaudeCode, Self::OpenCode];
 
     /// Where this client reads what pollen deploys.
     #[must_use]
     pub const fn spec(self) -> &'static ClientSpec {
-        const CLAUDE: ClientSpec = ClientSpec {
+        const CLAUDE_CODE: ClientSpec = ClientSpec {
             skills_dir: ".claude/skills",
         };
-        const AGENT_SKILLS: ClientSpec = ClientSpec {
+        const OPENCODE: ClientSpec = ClientSpec {
             skills_dir: ".agents/skills",
         };
         match self {
-            Self::Claude => &CLAUDE,
-            Self::AgentSkills => &AGENT_SKILLS,
+            Self::ClaudeCode => &CLAUDE_CODE,
+            Self::OpenCode => &OPENCODE,
         }
     }
 
@@ -235,14 +235,14 @@ impl Client {
 
 impl ClientChoice {
     /// Every choice, in the order they are documented.
-    pub const ALL: [Self; 3] = [Self::Claude, Self::AgentSkills, Self::All];
+    pub const ALL: [Self; 3] = [Self::ClaudeCode, Self::OpenCode, Self::All];
 
     /// The name the config and the command line give this choice.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Claude => "claude",
-            Self::AgentSkills => "agent-skills",
+            Self::ClaudeCode => "claude-code",
+            Self::OpenCode => "opencode",
             Self::All => "all",
         }
     }
@@ -251,8 +251,8 @@ impl ClientChoice {
     #[must_use]
     pub const fn clients(self) -> &'static [Client] {
         match self {
-            Self::Claude => &[Client::Claude],
-            Self::AgentSkills => &[Client::AgentSkills],
+            Self::ClaudeCode => &[Client::ClaudeCode],
+            Self::OpenCode => &[Client::OpenCode],
             Self::All => &Client::ALL,
         }
     }
@@ -266,7 +266,7 @@ impl std::str::FromStr for ClientChoice {
             .into_iter()
             .find(|choice| choice.name() == value)
             .ok_or_else(|| {
-                format!("unknown client `{value}`: expected `claude`, `agent-skills` or `all`")
+                format!("unknown client `{value}`: expected `claude-code`, `opencode` or `all`")
             })
     }
 }
@@ -311,12 +311,6 @@ fn parse(text: &str, path: &Path) -> Result<Config> {
         check(&v2, path)?;
         v2
     };
-    if latest.targets.is_some() && latest.clients.is_some() {
-        bail!(
-            "{} is invalid: set either `targets` (directories) or `clients` (their skill directories), not both",
-            path.display()
-        );
-    }
     let targets = latest.targets.clone();
     let clients = latest
         .clients
@@ -1128,13 +1122,16 @@ mod tests {
     fn clients_select_their_skill_directories() {
         for (clients, expected) in [
             ("all", vec![".claude/skills", ".agents/skills"]),
-            ("claude", vec![".claude/skills"]),
-            ("[agent-skills]", vec![".agents/skills"]),
+            ("claude-code", vec![".claude/skills"]),
+            ("[opencode]", vec![".agents/skills"]),
             (
-                "[agent-skills, claude, agent-skills]",
+                "[opencode, claude-code, opencode]",
                 vec![".agents/skills", ".claude/skills"],
             ),
-            ("[claude, all]", vec![".claude/skills", ".agents/skills"]),
+            (
+                "[claude-code, all]",
+                vec![".claude/skills", ".agents/skills"],
+            ),
         ] {
             let config = parse_v2(&format!("clients: {clients}\n")).unwrap();
 
@@ -1148,7 +1145,7 @@ mod tests {
 
     #[test]
     fn global_clients_select_the_home_skill_directories() {
-        let config = parse_v2("clients: claude\n").unwrap();
+        let config = parse_v2("clients: claude-code\n").unwrap();
         let home = dirs::home_dir().unwrap();
 
         assert_eq!(
@@ -1159,12 +1156,12 @@ mod tests {
 
     #[test]
     fn cli_targets_win_over_cli_clients_and_the_config() {
-        let config = parse_v2("clients: claude\n").unwrap();
+        let config = parse_v2("clients: claude-code\n").unwrap();
 
         assert_eq!(
             config.targets(
                 &[PathBuf::from("/tmp/override")],
-                &[Client::AgentSkills],
+                &[Client::OpenCode],
                 false
             ),
             [PathBuf::from("/tmp/override")]
@@ -1173,11 +1170,11 @@ mod tests {
 
     #[test]
     fn cli_clients_win_over_the_config() {
-        for keys in ["targets: [skills]\n", "clients: agent-skills\n", ""] {
+        for keys in ["targets: [skills]\n", "clients: opencode\n", ""] {
             let config = parse_v2(keys).unwrap();
 
             assert_eq!(
-                config.targets(&[], &[Client::Claude], false),
+                config.targets(&[], &[Client::ClaudeCode], false),
                 [PathBuf::from(".claude/skills")],
                 "{keys}"
             );
@@ -1185,15 +1182,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_targets_with_clients() {
-        let error = parse_v2("targets: [skills]\nclients: all\n").unwrap_err();
+    fn config_targets_replace_the_skill_directories_of_its_clients() {
+        let config = parse_v2("targets: [skills]\nclients: claude-code\n").unwrap();
 
-        assert!(
-            format!("{error:#}").ends_with(
-                "is invalid: set either `targets` (directories) or `clients` (their skill directories), not both"
-            ),
-            "{error:#}"
-        );
+        assert_eq!(config.clients, Some(vec![Client::ClaudeCode]));
+        assert_eq!(config.targets(&[], &[], false), [PathBuf::from("skills")]);
     }
 
     #[test]
@@ -1203,7 +1196,13 @@ mod tests {
             format!("{empty:#}").contains("at least one client is required"),
             "{empty:#}"
         );
-        for clients in ["[cursor]", "cursor", "{claude: true}"] {
+        for clients in [
+            "[cursor]",
+            "cursor",
+            "claude",
+            "agent-skills",
+            "{claude-code: true}",
+        ] {
             assert!(
                 parse_v2(&format!("clients: {clients}\n")).is_err(),
                 "{clients}"
@@ -1214,7 +1213,7 @@ mod tests {
     #[test]
     fn points_clients_in_version_one_at_version_two() {
         let error =
-            parse("clients: claude\nrepos:\n  - repo: local\n    paths:\n      - path: .\n")
+            parse("clients: claude-code\nrepos:\n  - repo: local\n    paths:\n      - path: .\n")
                 .unwrap_err();
 
         assert!(

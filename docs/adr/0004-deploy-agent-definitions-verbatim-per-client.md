@@ -1,6 +1,6 @@
 # 0004. Deploy agent definitions verbatim, per client
 
-- **Status**: proposed
+- **Status**: accepted
 - **Date**: 2026-11-22
 
 ## Context

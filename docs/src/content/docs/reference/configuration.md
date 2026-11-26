@@ -36,8 +36,8 @@ A file needs at least one of the two lists.
 | Key | Required | Default | Description |
 | --- | --- | --- | --- |
 | `version` | no | `1` | The [format version](#format-versions) the file is written in. This page describes version 2. |
-| `clients` | no | `all` | Version 2 only. The clients the skills are deployed for, as one value or a list: `all`, `claude` (`.claude/skills`) or `agent-skills` (`.agents/skills`, the directory every other Agent Skills client scans). The directories are in the working directory, or in the home directory with `--global`. Forbidden with `targets`. |
-| `targets` | no | — | Directories the skills are deployed into, instead of the `clients`' ones; each gets a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. Forbidden with `clients`. |
+| `clients` | no | `all` | Version 2 only. The clients pollen deploys for, as one value or a list: `all`, `claude-code` (skills in `.claude/skills`) or `opencode` (skills in `.agents/skills`, the directory most other Agent Skills clients scan too). The directories are in the working directory, or in the home directory with `--global`. `all` is every client this pollen knows. |
+| `targets` | no | — | Directories the skills are deployed into, instead of the `clients`' skill directories; each gets a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. |
 | `repos[].repo` | yes | — | A git URL, a path to a git repository, or `local` for the directory holding the config file. |
 | `repos[].revision` | for git | — | Tag, branch or commit to check out. A branch draws a warning, since each update deploys whatever it points to then; a full commit SHA is the only revision that cannot move (`pollen validate --pinned` enforces it). Forbidden on `local`. |
 | `repos[].skills[].path` | yes | — | Directory to search, relative to the source root. Write it with `/`, which every platform reads. |
@@ -61,15 +61,17 @@ Links within the root retain their selected name and path. Excluded candidates
 are not selected and do not enter this check.
 
 By default the skills go to both `.claude/skills` and `.agents/skills`. Set
-`clients` to deploy for some of them only — Claude Code alone, here, in the
+`clients` to deploy for some clients only — Claude Code alone, here, in the
 project or under the home directory with `--global`:
 
 ```yaml
 version: 2
-clients: claude
+clients: claude-code
 ```
 
-Set `targets` instead to deploy into directories of your own:
+A client this list does not name is served through `.agents/skills`, the
+`opencode` client's skill directory, when it reads that directory, or through
+`targets`. Set `targets` to deploy the skills into directories of your own:
 
 ```yaml
 version: 2

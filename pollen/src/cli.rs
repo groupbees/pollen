@@ -149,8 +149,8 @@ impl ValueEnum for ClientChoice {
 
     fn to_possible_value(&self) -> Option<PossibleValue> {
         let help = match self {
-            Self::Claude => "Claude Code, into `.claude/skills`",
-            Self::AgentSkills => "Every other Agent Skills client, into `.agents/skills`",
+            Self::ClaudeCode => "Claude Code, skills into `.claude/skills`",
+            Self::OpenCode => "OpenCode, skills into `.agents/skills`",
             Self::All => "Every client",
         };
         Some(PossibleValue::new(self.name()).help(help))
@@ -611,17 +611,17 @@ mod tests {
         let repeated = Cli::parse_from([
             "pollen",
             "--client",
-            "agent-skills",
+            "opencode",
             "--client",
-            "claude",
+            "claude-code",
             "update",
         ]);
-        let listed = Cli::parse_from(["pollen", "update", "--client", "agent-skills,claude"]);
+        let listed = Cli::parse_from(["pollen", "update", "--client", "opencode,claude-code"]);
         let all = Cli::parse_from(["pollen", "update", "--client", "all"]);
 
         assert_eq!(
             repeated.options.clients(),
-            [Client::AgentSkills, Client::Claude]
+            [Client::OpenCode, Client::ClaudeCode]
         );
         assert_eq!(listed.options.clients(), repeated.options.clients());
         assert_eq!(all.options.clients(), Client::ALL);
@@ -646,7 +646,12 @@ mod tests {
         assert!(Cli::try_parse_from(["pollen", "update", "--client", "cursor"]).is_err());
         assert!(
             Cli::try_parse_from([
-                "pollen", "update", "--client", "claude", "--target", "skills"
+                "pollen",
+                "update",
+                "--client",
+                "claude-code",
+                "--target",
+                "skills"
             ])
             .is_err()
         );

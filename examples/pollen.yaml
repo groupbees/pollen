@@ -8,15 +8,15 @@
 # file in the newest version.
 version: 2
 
-# The clients the skills are deployed for, each through its own skill
-# directory: `claude` (.claude/skills, what Claude Code reads) and
-# `agent-skills` (.agents/skills, the cross-client convention every other
-# Agent Skills client scans). Under the home directory with --global.
-# Default: all.
+# The clients pollen deploys for: `claude-code` (skills in .claude/skills)
+# and `opencode` (skills in .agents/skills, the cross-client convention most
+# other Agent Skills clients scan too). Under the home directory with
+# --global. Default: all, every client this pollen knows.
 clients: all
 
-# Or directories of your own instead of `clients`; each gets a full copy. A
-# relative path resolves against the working directory, and `~` is expanded.
+# Directories of your own, replacing the skill directories of `clients`;
+# each gets a full copy. A relative path resolves against the working
+# directory, and `~` is expanded.
 # targets:
 #   - ~/team/skills
 

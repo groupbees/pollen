@@ -137,7 +137,7 @@ for some clients only, whatever the config's `targets` and `clients` say:
 
 ```sh
 pollen update --target ~/.claude/skills --target ~/.agents/skills
-pollen update --client claude
+pollen update --client claude-code
 ```
 
 Deploy the skills you want in every project, from your user-level config:
