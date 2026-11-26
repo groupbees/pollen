@@ -4,13 +4,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 
+use crate::agent::{self, Details};
 use crate::cli::Options;
 use crate::command::plan::{self, Planned};
 use crate::command::{Context, directories};
 use crate::config::{Config, Scope};
 use crate::deploy;
 use crate::source::Materializer;
-use crate::state::{InstalledSkill, State};
+use crate::state::{InstalledSkill, Kind, State};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -48,15 +49,20 @@ impl Action {
 pub struct Change {
     pub action: Action,
     pub name: String,
-    /// Where the skill comes from, empty for a removal.
+    /// Where the skill or agent comes from, empty for a removal.
     pub origin: String,
+    /// What an agent's frontmatter grants; `None` for a skill and for a
+    /// removal.
+    pub details: Option<Details>,
 }
 
-/// The result of an update, as printed to stdout.
+/// The result of an update in one directory, as printed to stdout.
 #[derive(Debug)]
 pub struct Summary {
     pub target: PathBuf,
-    /// One entry per skill, ordered by name within each action.
+    /// What the directory holds.
+    pub kind: Kind,
+    /// One entry per skill or agent, ordered by name within each action.
     pub changes: Vec<Change>,
     /// Whether the target directory was left untouched.
     pub dry_run: bool,
@@ -88,6 +94,13 @@ impl fmt::Display for Summary {
             } else {
                 writeln!(formatter, "{line}  {}", change.origin)?;
             }
+            if let Some(details) = change
+                .details
+                .as_ref()
+                .filter(|details| !details.is_empty())
+            {
+                writeln!(formatter, "{:indent$}{details}", "", indent = width + 4)?;
+            }
         }
 
         let counts = [
@@ -111,7 +124,8 @@ impl fmt::Display for Summary {
         } else {
             format!(": {counts}")
         };
-        let noun = if installed == 1 { "skill" } else { "skills" };
+        let (one, many) = self.kind.nouns();
+        let noun = if installed == 1 { one } else { many };
         writeln!(
             formatter,
             "{installed} {noun} in {}{detail}{suffix}",
@@ -199,9 +213,10 @@ pub async fn report(
 ///
 /// # Errors
 ///
-/// When a source cannot be fetched, a selected skill is invalid, two sources
-/// send the same name to one directory, or a directory holds an unmanaged
-/// directory of that name and `force` is not set.
+/// When a source cannot be fetched, a selected skill or agent is invalid,
+/// two sources send the same name to one directory, a directory would
+/// receive both kinds or holds the other kind, or a directory holds an
+/// unmanaged entry of that name and `force` is not set.
 pub async fn update(
     config: &Config,
     scope: &Scope,
@@ -213,31 +228,40 @@ pub async fn update(
     let plan = plan::build(config, scope, materializer, allow_hidden_characters).await?;
     if !plan.problems.is_empty() {
         for problem in &plan.problems {
-            tracing::error!("{problem}");
+            tracing::error!("{}", problem.message);
         }
-        bail!("{} skill(s) are invalid", plan.problems.len());
+        bail!("{}", plan::describe(&plan.problems));
     }
 
     let mut summaries = Vec::new();
-    for dir in directories(config, scope) {
-        let skills = plan.skills_for(&dir);
-        if skills.is_empty() && !State::path(&dir).is_file() {
+    for (dir, kind) in directories(config, scope) {
+        let target = plan.target_for(&dir);
+        let entries = target.map_or(&[][..], |target| &target.entries);
+        let kind = target.map_or(kind, |target| target.kind);
+        if entries.is_empty() && !State::path(&dir).is_file() {
             tracing::debug!(target = %dir.display(), "nothing planned, nothing to prune");
             continue;
         }
-        summaries.push(apply(skills, &config.file, &dir, dry_run, force)?);
+        summaries.push(apply(entries, kind, &config.file, &dir, dry_run, force)?);
     }
     Ok(Report { summaries })
 }
 
+/// Deploy `entries`, which are of `kind`, into `target`, and prune what its
+/// state records beyond them. With nothing to deploy, the state's own kind
+/// says how its entries are laid out.
 fn apply(
-    skills: &[Planned],
+    entries: &[Planned],
+    kind: Kind,
     config_file: &Path,
     target: &Path,
     dry_run: bool,
     force: bool,
 ) -> Result<Summary> {
-    let mut state = State::load(target)?;
+    let mut state = State::read(target)?.unwrap_or_else(|| State::new(kind));
+    if !entries.is_empty() {
+        check_kind(&state, kind, target)?;
+    }
     check_owner(&state, config_file, target, force)?;
     if !config_file.as_os_str().is_empty() {
         state.config = Some(config_file.to_path_buf());
@@ -249,14 +273,14 @@ fn apply(
     }
 
     let mut changes = Vec::new();
-    let reconciled = reconcile(skills, target, &mut state, &mut changes, dry_run, force);
+    let reconciled = reconcile(entries, target, &mut state, &mut changes, dry_run, force);
 
     // Saved whatever happened: a skill installed before a failure is on disk,
     // and an unrecorded one would be refused as unmanaged by the next run.
     // When both fail, the reconcile error is the one returned, and the save
     // error is logged rather than lost.
     if !dry_run {
-        let written = if state.skills.is_empty() && skills.is_empty() {
+        let written = if state.entries.is_empty() && entries.is_empty() {
             forget(target)
         } else {
             state.save(target)
@@ -272,6 +296,7 @@ fn apply(
 
     Ok(Summary {
         target: target.to_path_buf(),
+        kind: state.kind,
         changes,
         dry_run,
     })
@@ -297,6 +322,20 @@ fn forget(target: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Refuse to deploy one kind into a directory recorded as holding the other.
+fn check_kind(state: &State, kind: Kind, target: &Path) -> Result<()> {
+    if state.kind == kind {
+        return Ok(());
+    }
+    bail!(
+        "{} holds {} pollen deployed, so pollen does not deploy {} into it; choose another directory, or remove {} if pollen should forget what it deployed there",
+        target.display(),
+        state.kind.nouns().1,
+        kind.nouns().1,
+        State::path(target).display()
+    )
+}
+
 /// Refuse a target another config still manages, unless `force` hands it over.
 ///
 /// A recorded config that no longer exists is not an owner any more — the
@@ -309,7 +348,7 @@ fn check_owner(state: &State, config_file: &Path, target: &Path, force: bool) ->
     if force
         || config_file.as_os_str().is_empty()
         || owner == config_file
-        || state.skills.is_empty()
+        || state.entries.is_empty()
         || !owner.is_file()
     {
         return Ok(());
@@ -322,46 +361,60 @@ fn check_owner(state: &State, config_file: &Path, target: &Path, force: bool) ->
     )
 }
 
-/// Install every planned skill into `target`, then remove the ones the config
+/// Where `name` is installed in `target`, which holds `kind`: a skill
+/// directory, or an agent file.
+fn entry_path(target: &Path, kind: Kind, name: &str) -> PathBuf {
+    match kind {
+        Kind::Skills => target.join(name),
+        Kind::Agents => target.join(format!("{name}{}", agent::SUFFIX)),
+    }
+}
+
+/// Install every planned entry into `target`, then remove the ones the config
 /// no longer selects, recording each step in `state` and `changes` as it lands.
 fn reconcile(
-    skills: &[Planned],
+    entries: &[Planned],
     target: &Path,
     state: &mut State,
     changes: &mut Vec<Change>,
     dry_run: bool,
     force: bool,
 ) -> Result<()> {
-    for planned in skills {
+    for planned in entries {
         let action = install(target, state, planned, dry_run, force)?;
         changes.push(Change {
             action,
             name: planned.name.clone(),
             origin: planned.origin(),
+            details: planned.details.clone(),
         });
     }
 
-    let declared: BTreeSet<&str> = skills.iter().map(|skill| skill.name.as_str()).collect();
+    let declared: BTreeSet<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
     let orphans: Vec<String> = state
-        .skills
+        .entries
         .keys()
         .filter(|name| !declared.contains(name.as_str()))
         .cloned()
         .collect();
     for name in orphans {
-        let destination = target.join(&name);
+        let path = entry_path(target, state.kind, &name);
         if dry_run {
-            tracing::info!(skill = %name, path = %destination.display(), "would remove");
+            tracing::info!(name = %name, path = %path.display(), "would remove");
         } else {
-            tracing::info!(skill = %name, path = %destination.display(), "removing");
-            deploy::remove(&destination)?;
+            tracing::info!(name = %name, path = %path.display(), "removing");
+            match state.kind {
+                Kind::Skills => deploy::remove(&path)?,
+                Kind::Agents => deploy::remove_file(&path)?,
+            }
         }
 
-        state.skills.remove(&name);
+        state.entries.remove(&name);
         changes.push(Change {
             action: Action::Removed,
             name,
             origin: String::new(),
+            details: None,
         });
     }
     Ok(())
@@ -375,37 +428,44 @@ fn install(
     force: bool,
 ) -> Result<Action> {
     let _span = tracing::info_span!("target", path = %target.display()).entered();
-    let destination = target.join(&planned.name);
-    let known = state.skills.get(&planned.name);
+    let path = entry_path(target, state.kind, &planned.name);
+    let known = state.entries.get(&planned.name);
 
-    if known.is_none() && destination.exists() && !force {
+    if known.is_none() && path.exists() && !force {
         bail!(
             "{} already exists and pollen did not install it; move it aside, or pass --force to take it over",
-            destination.display()
+            path.display()
         );
     }
 
+    let installed = match state.kind {
+        Kind::Skills if path.is_dir() => Some(deploy::checksum(&path)?),
+        Kind::Agents if path.is_file() => Some(deploy::checksum_file(&path)?),
+        _ => None,
+    };
     let action = if known.is_some_and(|record| record.checksum == planned.checksum)
-        && destination.is_dir()
-        && deploy::checksum(&destination)? == planned.checksum
+        && installed.as_ref() == Some(&planned.checksum)
     {
         Action::Unchanged
-    } else if destination.exists() {
+    } else if path.exists() {
         Action::Updated
     } else {
         Action::Added
     };
 
     if action == Action::Unchanged {
-        tracing::debug!(skill = %planned.name, "unchanged");
+        tracing::debug!(name = %planned.name, "unchanged");
     } else if dry_run {
-        tracing::info!(skill = %planned.name, origin = %planned.origin(), action = action.label(), "would install");
+        tracing::info!(name = %planned.name, origin = %planned.origin(), action = action.label(), "would install");
     } else {
-        tracing::info!(skill = %planned.name, origin = %planned.origin(), action = action.label(), "installing");
-        deploy::install(&planned.source_dir, &destination)?;
+        tracing::info!(name = %planned.name, origin = %planned.origin(), action = action.label(), "installing");
+        match state.kind {
+            Kind::Skills => deploy::install(&planned.source, &path)?,
+            Kind::Agents => deploy::install_file(&planned.source, &path)?,
+        }
     }
 
-    state.skills.insert(
+    state.entries.insert(
         planned.name.clone(),
         InstalledSkill {
             repo: planned.repo.clone(),
@@ -422,7 +482,8 @@ fn install(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Client, Destination, PathSpec, Repo, Selection};
+    use crate::agent::Details;
+    use crate::config::{AgentSelection, Client, Destination, PathSpec, Repo, Selection};
     use crate::source::{Materialized, MockMaterializer};
     use crate::state::State;
 
@@ -452,6 +513,7 @@ mod tests {
                         },
                         destination: Destination::Default,
                     }],
+                    agents: Vec::new(),
                 })
                 .collect(),
             base_dir: PathBuf::new(),
@@ -478,6 +540,7 @@ mod tests {
         Scope {
             cli: Destination::Targets(dirs.to_vec()),
             root: PathBuf::new(),
+            user_config: None,
         }
     }
 
@@ -491,6 +554,7 @@ mod tests {
         Scope {
             cli: Destination::Default,
             root: root.to_path_buf(),
+            user_config: None,
         }
     }
 
@@ -523,7 +587,7 @@ mod tests {
         assert!(
             State::load(target.path())
                 .unwrap()
-                .skills
+                .entries
                 .contains_key("demo")
         );
     }
@@ -822,8 +886,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(recorded.skills.contains_key("alpha"));
-        assert!(!recorded.skills.contains_key("beta"));
+        assert!(recorded.entries.contains_key("alpha"));
+        assert!(!recorded.entries.contains_key("beta"));
         assert_eq!(
             actions(&retry),
             [(Action::Unchanged, "alpha"), (Action::Added, "beta")]
@@ -965,8 +1029,8 @@ mod tests {
         assert_eq!(report.count(Action::Added), 2);
         assert!(claude.join("demo/SKILL.md").is_file());
         assert!(agents.join("demo/SKILL.md").is_file());
-        assert!(State::load(&claude).unwrap().skills.contains_key("demo"));
-        assert!(State::load(&agents).unwrap().skills.contains_key("demo"));
+        assert!(State::load(&claude).unwrap().entries.contains_key("demo"));
+        assert!(State::load(&agents).unwrap().entries.contains_key("demo"));
     }
 
     #[tokio::test]
@@ -1071,7 +1135,8 @@ mod tests {
             [Change {
                 action: Action::Removed,
                 name: "demo".to_owned(),
-                origin: String::new()
+                origin: String::new(),
+                details: None,
             }]
         );
         assert!(!agents.exists());
@@ -1186,6 +1251,7 @@ mod tests {
         let claude_only = Scope {
             cli: Destination::Clients(vec![Client::ClaudeCode]),
             root: root.path().to_path_buf(),
+            user_config: None,
         };
 
         for scope in [one(&elsewhere), claude_only] {
@@ -1220,8 +1286,8 @@ mod tests {
         assert_eq!(report.count(Action::Added), 2);
         let claude = State::load(&root.path().join(".claude/skills")).unwrap();
         let agents = State::load(&root.path().join(".agents/skills")).unwrap();
-        assert_eq!(claude.skills["demo"].repo, "https://example.invalid/0.git");
-        assert_eq!(agents.skills["demo"].repo, "https://example.invalid/1.git");
+        assert_eq!(claude.entries["demo"].repo, "https://example.invalid/0.git");
+        assert_eq!(agents.entries["demo"].repo, "https://example.invalid/1.git");
     }
 
     #[tokio::test]
@@ -1248,20 +1314,436 @@ mod tests {
         );
     }
 
+    fn write_agent(root: &Path, dir: &str, file: &str, text: &str) {
+        let dir = root.join(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(file), text).unwrap();
+    }
+
+    /// `config` with a `local` source taking skills under `skills` for its
+    /// default clients, and agents under `agents`, sent to `destination`.
+    fn with_agents(config: Config, destination: Destination) -> Config {
+        Config {
+            repos: vec![Repo::Local {
+                paths: vec![Selection {
+                    spec: PathSpec {
+                        path: PathBuf::from("skills"),
+                        recurse: false,
+                        exclude: None,
+                    },
+                    destination: Destination::Default,
+                }],
+                agents: vec![AgentSelection {
+                    path: PathBuf::from("agents"),
+                    exclude: None,
+                    destination,
+                }],
+            }],
+            ..config
+        }
+    }
+
+    const REVIEWER: &str = "---\nname: reviewer\ndescription: Reviews.\ntools: Read\n---\n";
+
+    #[tokio::test]
+    async fn deploys_one_name_as_a_skill_and_as_an_agent_of_each_client() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "reviewer", "A skill.");
+        write_agent(source.path(), "agents", "reviewer.md", REVIEWER);
+        let config = with_agents(config_with(0), Destination::Default);
+        let mock = materializer(source.path());
+
+        let first = update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+        let second = update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        assert_eq!(first.count(Action::Added), 4);
+        assert_eq!(second.count(Action::Unchanged), 4);
+        assert!(
+            root.path()
+                .join(".claude/skills/reviewer/SKILL.md")
+                .is_file()
+        );
+        for dir in [".claude/agents", ".opencode/agents"] {
+            let agents = root.path().join(dir);
+            assert_eq!(
+                std::fs::read_to_string(agents.join("reviewer.md")).unwrap(),
+                REVIEWER
+            );
+            let state = State::load(&agents).unwrap();
+            assert_eq!(state.kind, Kind::Agents);
+            assert_eq!(state.entries["reviewer"].source_path, "agents/reviewer.md");
+        }
+        let agents = &first.summaries[2];
+        assert_eq!(agents.kind, Kind::Agents);
+        assert_eq!(
+            agents.changes[0].details.as_ref().unwrap().tools.as_deref(),
+            Some("Read")
+        );
+    }
+
+    #[tokio::test]
+    async fn checks_an_agent_against_every_client_it_goes_to_and_says_which_refused() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(source.path().join("skills")).unwrap();
+        write_agent(
+            source.path(),
+            "agents",
+            "helper.md",
+            "---\ndescription: Helps.\n---\n",
+        );
+        let mock = materializer(source.path());
+
+        let both = with_agents(config_with(0), Destination::Default);
+        let error = update(&both, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "1 agent(s) are invalid");
+        assert!(!root.path().join(".opencode").exists());
+
+        let opencode = with_agents(config_with(0), Destination::Clients(vec![Client::OpenCode]));
+        update(&opencode, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+        assert!(root.path().join(".opencode/agents/helper.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn an_agent_sent_to_targets_passes_only_the_shared_checks() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(source.path().join("skills")).unwrap();
+        write_agent(source.path(), "agents", "bare.md", "---\nmodel: x\n---\n");
+        let out = root.path().join("out");
+        let config = with_agents(config_with(0), Destination::Targets(vec![out.clone()]));
+
+        update(
+            &config,
+            &plain(root.path()),
+            &materializer(source.path()),
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(out.join("bare.md").is_file());
+        assert_eq!(State::load(&out).unwrap().kind, Kind::Agents);
+    }
+
+    #[tokio::test]
+    async fn reinstalls_an_agent_edited_by_hand_and_prunes_one_no_longer_declared() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(source.path().join("skills")).unwrap();
+        for name in ["kept", "gone"] {
+            write_agent(
+                source.path(),
+                "agents",
+                &format!("{name}.md"),
+                "---\ndescription: x\n---\n",
+            );
+        }
+        let agents = root.path().join(".opencode/agents");
+        let config = with_agents(config_with(0), Destination::Clients(vec![Client::OpenCode]));
+        let mock = materializer(source.path());
+
+        update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+        std::fs::write(agents.join("kept.md"), "tampered").unwrap();
+        std::fs::remove_file(source.path().join("agents/gone.md")).unwrap();
+        let report = update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            actions(&report),
+            [(Action::Updated, "kept"), (Action::Removed, "gone")]
+        );
+        assert!(!agents.join("gone.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(agents.join("kept.md")).unwrap(),
+            "---\ndescription: x\n---\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_an_agent_file_it_did_not_install_unless_forced() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(source.path().join("skills")).unwrap();
+        write_agent(
+            source.path(),
+            "agents",
+            "mine.md",
+            "---\ndescription: x\n---\n",
+        );
+        write_agent(root.path(), ".opencode/agents", "mine.md", "handwritten");
+        let config = with_agents(config_with(0), Destination::Clients(vec![Client::OpenCode]));
+        let mock = materializer(source.path());
+
+        let error = update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("--force"), "{error}");
+        update(&config, &plain(root.path()), &mock, false, true, false)
+            .await
+            .unwrap();
+
+        assert_ne!(
+            std::fs::read_to_string(root.path().join(".opencode/agents/mine.md")).unwrap(),
+            "handwritten"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cli_target_deploys_skills_only() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        write_agent(source.path(), "agents", "reviewer.md", REVIEWER);
+        let out = root.path().join("out");
+        let config = with_agents(config_with(0), Destination::Default);
+
+        let report = update(
+            &config,
+            &one(&out),
+            &materializer(source.path()),
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(actions(&report), [(Action::Added, "demo")]);
+        assert!(!out.join("reviewer.md").exists());
+        assert!(!root.path().join(".claude").exists());
+    }
+
+    #[tokio::test]
+    async fn refuses_to_deploy_one_kind_where_the_state_records_the_other() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        write_agent(source.path(), "agents", "reviewer.md", REVIEWER);
+        let agents = root.path().join(".claude/agents");
+        let config = with_agents(
+            config_with(0),
+            Destination::Clients(vec![Client::ClaudeCode]),
+        );
+        let mock = materializer(source.path());
+        update(&config, &plain(root.path()), &mock, false, false, false)
+            .await
+            .unwrap();
+
+        for force in [false, true] {
+            let error = update(&config, &one(&agents), &mock, false, force, false)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("holds agents pollen deployed"), "{error}");
+        }
+        let skills = root.path().join("skills-out");
+        update(&config, &one(&skills), &mock, false, false, false)
+            .await
+            .unwrap();
+        let into_skills = with_agents(config_with(0), Destination::Targets(vec![skills]));
+        let error = update(
+            &into_skills,
+            &plain(root.path()),
+            &mock,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("holds skills pollen deployed"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn refuses_one_directory_for_skills_and_agents() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        write_agent(source.path(), "agents", "reviewer.md", REVIEWER);
+        let shared = root.path().join("shared");
+        let mut config = with_agents(config_with(0), Destination::Targets(vec![shared.clone()]));
+        if let Repo::Local { paths, .. } = &mut config.repos[0] {
+            paths[0].destination = Destination::Targets(vec![shared.clone()]);
+        }
+
+        let error = update(
+            &config,
+            &plain(root.path()),
+            &materializer(source.path()),
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("both skills and agents"), "{error}");
+        assert!(!shared.exists());
+    }
+
+    #[tokio::test]
+    async fn refuses_two_sources_sending_one_agent_to_one_directory() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(source.path().join("skills")).unwrap();
+        write_agent(
+            source.path(),
+            "agents",
+            "twice.md",
+            "---\ndescription: x\n---\n",
+        );
+        let mut config = with_agents(config_with(0), Destination::Clients(vec![Client::OpenCode]));
+        config.repos.push(config.repos[0].clone());
+
+        let error = update(
+            &config,
+            &plain(root.path()),
+            &materializer(source.path()),
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("two sources provide the agent `twice`"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn prunes_the_agent_directory_of_a_client_the_config_dropped() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+        write_agent(source.path(), "agents", "reviewer.md", REVIEWER);
+        let owned = config_owned_by(configs.path(), "a.yaml");
+        let mock = materializer(source.path());
+        update(
+            &with_agents(owned.clone(), Destination::Default),
+            &plain(root.path()),
+            &mock,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let claude_only = with_agents(owned, Destination::Clients(vec![Client::ClaudeCode]));
+        let report = update(
+            &claude_only,
+            &plain(root.path()),
+            &mock,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let opencode = root.path().join(".opencode/agents");
+        let pruned = report
+            .summaries
+            .iter()
+            .find(|summary| summary.target == opencode)
+            .unwrap();
+        assert_eq!(pruned.kind, Kind::Agents);
+        assert_eq!(pruned.count(Action::Removed), 1);
+        assert!(!opencode.exists());
+        assert!(root.path().join(".claude/agents/reviewer.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn a_config_without_agents_creates_no_agent_directory() {
+        let source = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let configs = tempfile::tempdir().unwrap();
+        write_skill(source.path(), "demo", "A demo skill.");
+
+        update(
+            &config_owned_by(configs.path(), "a.yaml"),
+            &plain(root.path()),
+            &materializer(source.path()),
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(root.path().join(".claude/skills/demo").is_dir());
+        assert!(!root.path().join(".claude/agents").exists());
+        assert!(!root.path().join(".opencode").exists());
+    }
+
+    #[test]
+    fn the_summary_shows_what_each_agent_grants() {
+        let summary = Summary {
+            target: PathBuf::from(".claude/agents"),
+            kind: Kind::Agents,
+            changes: vec![Change {
+                action: Action::Added,
+                name: "reviewer".to_owned(),
+                origin: "local agents/reviewer.md".to_owned(),
+                details: Some(Details {
+                    tools: Some("Read, Grep".to_owned()),
+                    model: Some("opus".to_owned()),
+                    permission: None,
+                    hooks: false,
+                    mcp_servers: true,
+                }),
+            }],
+            dry_run: false,
+        };
+
+        assert_eq!(
+            summary.to_string(),
+            "+ reviewer  local agents/reviewer.md\n\
+             \x20           tools: Read, Grep; model: opus; MCP servers\n\
+             1 agent in .claude/agents: 1 added\n"
+        );
+    }
+
     #[test]
     fn the_summary_counts_every_action() {
         let summary = Summary {
             target: PathBuf::from(".claude/skills"),
+            kind: Kind::Skills,
             changes: vec![
                 Change {
                     action: Action::Added,
                     name: "alpha".to_owned(),
                     origin: "local skills/alpha".to_owned(),
+                    details: None,
                 },
                 Change {
                     action: Action::Removed,
                     name: "beta".to_owned(),
                     origin: String::new(),
+                    details: None,
                 },
             ],
             dry_run: false,

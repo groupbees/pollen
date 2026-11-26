@@ -1,16 +1,66 @@
 {
   "$defs": {
+    "AgentsV2": {
+      "additionalProperties": false,
+      "description": "One directory of agent files inside a git or `local` source, in version\n2, and where its agents go.",
+      "not": {
+        "required": [
+          "clients",
+          "targets"
+        ]
+      },
+      "properties": {
+        "clients": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The clients these agents are deployed for, one or a list, instead of\nthe top-level `clients`: into each one's agent directory, checked\nagainst each one's rules. Not with `targets`."
+        },
+        "exclude": {
+          "description": "Regular expression rejecting agents whose name, the file name without\n`.md`, matches.",
+          "format": "regex",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Directory holding the agent files, relative to the source root.\n\nEvery file directly under it ending in `.md` is an agent, named after\nthe file; subdirectories are not searched.",
+          "type": "string"
+        },
+        "targets": {
+          "description": "Directories these agents are deployed into, instead of the agent\ndirectories of any client. Not with `clients`.\n\nA relative path resolves against the working directory, and a leading\n`~` is expanded.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
     "ClientChoice": {
       "description": "A client named in the config or on the command line: one client, or all\nof them.",
       "oneOf": [
         {
           "const": "claude-code",
-          "description": "Claude Code, into `.claude/skills`.",
+          "description": "Claude Code, into `.claude/skills` and `.claude/agents`.",
           "type": "string"
         },
         {
           "const": "opencode",
-          "description": "OpenCode, into `.agents/skills`.",
+          "description": "OpenCode, into `.agents/skills` and `.opencode/agents`.",
           "type": "string"
         },
         {
@@ -243,6 +293,18 @@
     },
     "RepoV2": {
       "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "skills"
+          ]
+        },
+        {
+          "required": [
+            "agents"
+          ]
+        }
+      ],
       "description": "A git repository, or the config file's own directory, in version 2.",
       "else": {
         "properties": {
@@ -263,6 +325,17 @@
         }
       },
       "properties": {
+        "agents": {
+          "description": "Where to look for agent files inside the source.",
+          "items": {
+            "$ref": "#/$defs/AgentsV2"
+          },
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "repo": {
           "description": "A git URL, a path to a git repository, or `local` for the directory\nholding this config file.",
           "minLength": 1,
@@ -281,12 +354,14 @@
             "$ref": "#/$defs/SkillsV2"
           },
           "minItems": 1,
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
-        "repo",
-        "skills"
+        "repo"
       ],
       "then": {
         "properties": {

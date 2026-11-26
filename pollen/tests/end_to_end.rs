@@ -27,6 +27,7 @@ fn into(target: &Path) -> Scope {
     Scope {
         cli: Destination::Targets(vec![target.to_path_buf()]),
         root: PathBuf::new(),
+        user_config: None,
     }
 }
 
@@ -36,6 +37,7 @@ fn plain(root: &Path) -> Scope {
     Scope {
         cli: Destination::Default,
         root: root.to_path_buf(),
+        user_config: None,
     }
 }
 
@@ -101,9 +103,12 @@ async fn deploys_skills_from_a_git_tag_and_from_the_config_directory() {
     assert!(!target.join("wip").exists());
 
     let state = State::load(&target).unwrap();
-    assert_eq!(state.skills["from-git"].revision.as_deref(), Some("v1.0.0"));
-    assert_eq!(state.skills["from-git"].commit.as_ref().unwrap().len(), 40);
-    assert_eq!(state.skills["from-local"].repo, "local");
+    assert_eq!(
+        state.entries["from-git"].revision.as_deref(),
+        Some("v1.0.0")
+    );
+    assert_eq!(state.entries["from-git"].commit.as_ref().unwrap().len(), 40);
+    assert_eq!(state.entries["from-local"].repo, "local");
 
     let offline = fetcher_for(&config, cache.path(), true);
     let second: Report = update(&config, &into(&target), &offline, false, false, false)
@@ -292,7 +297,7 @@ mod destinations {
         fn names(&self, dir: &str) -> Vec<String> {
             State::load(&self.path(dir))
                 .unwrap()
-                .skills
+                .entries
                 .into_keys()
                 .collect()
         }
@@ -807,8 +812,8 @@ mod well_known {
         let report = update::report(&options, false, false, false).await.unwrap();
         assert_eq!(report.count(update::Action::Added), 1);
         let state = pollen::state::State::load(&workspace.path().join("deployed")).unwrap();
-        assert_eq!(state.skills["alpha"].digest, Some(digest(&first)));
-        assert_eq!(state.skills["alpha"].repo, server.uri());
+        assert_eq!(state.entries["alpha"].digest, Some(digest(&first)));
+        assert_eq!(state.entries["alpha"].repo, server.uri());
 
         assert!(
             validate::check(&options, &config, true, true, false)
@@ -951,6 +956,371 @@ mod well_known {
         ];
         for error in errors {
             assert!(error.contains("`broken` has the digest"), "{error}");
+        }
+    }
+}
+
+/// Agents deployed by the `pollen` binary, run from a workspace as a user
+/// would, so the client directories resolve against its working directory.
+mod agents {
+    use std::fmt::Write as _;
+    use std::path::Path;
+    use std::process::{Command, Output};
+
+    use pollen::state::{Kind, State};
+
+    use super::{commit_and_tag, write_skill};
+
+    const CLAUDE_REVIEWER: &str = "---\nname: reviewer\ndescription: Reviews code.\ntools: Read, Grep\nmodel: opus\npermissionMode: plan\nhooks:\n  Stop: []\n---\nYou review code.\n";
+    const OPENCODE_REVIEWER: &str = "---\ndescription: Reviews code.\nmodel: anthropic/claude-sonnet-4-5\npermission:\n  edit: deny\n---\nYou review code.\n";
+
+    /// A git repository holding a `reviewer` skill, and a `reviewer` agent
+    /// written for each client beside a README the config excludes.
+    fn catalog() -> tempfile::TempDir {
+        let origin = tempfile::tempdir().unwrap();
+        write_skill(&origin.path().join("skills/reviewer"), "reviewer");
+        for (dir, text) in [("claude", CLAUDE_REVIEWER), ("opencode", OPENCODE_REVIEWER)] {
+            let agents = origin.path().join("agents").join(dir);
+            std::fs::create_dir_all(&agents).unwrap();
+            std::fs::write(agents.join("reviewer.md"), text).unwrap();
+            std::fs::write(agents.join("README.md"), "# Agents\n").unwrap();
+        }
+        commit_and_tag(origin.path(), "v1.0.0");
+        origin
+    }
+
+    fn config(origin: &Path, clients: &str, agents: &[&str]) -> String {
+        let mut text = format!(
+            "version: 2\nclients: {clients}\nrepos:\n  - repo: {}\n    revision: v1.0.0\n    skills:\n      - path: skills\n    agents:\n",
+            origin.display()
+        );
+        for client in agents {
+            let dir = if *client == "claude-code" {
+                "claude"
+            } else {
+                "opencode"
+            };
+            let _ = write!(
+                text,
+                "      - path: agents/{dir}\n        clients: {client}\n        exclude: ^README$\n"
+            );
+        }
+        text
+    }
+
+    /// Run `pollen` in `workspace` with nothing inherited from the caller's
+    /// `POLLEN_*` variables.
+    fn pollen(
+        workspace: &Path,
+        cache: &Path,
+        args: &[&str],
+        env: &[(&str, Option<&Path>)],
+    ) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_pollen"));
+        command
+            .current_dir(workspace)
+            .arg("--cache-dir")
+            .arg(cache)
+            .args(args)
+            // GitHub's Windows runners set `core.autocrlf=true`, so the
+            // checkout pollen copies would hold CRLF and never equal the LF
+            // bytes these tests wrote.
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "core.autocrlf")
+            .env("GIT_CONFIG_VALUE_0", "false");
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("POLLEN_") {
+                command.env_remove(name);
+            }
+        }
+        for (name, value) in env {
+            match value {
+                Some(value) => command.env(name, value),
+                None => command.env_remove(name),
+            };
+        }
+        command.output().unwrap()
+    }
+
+    fn succeeds(output: &Output) -> String {
+        assert!(
+            output.status.success(),
+            "pollen failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout.clone()).unwrap()
+    }
+
+    fn fails(output: &Output) -> String {
+        assert!(!output.status.success(), "pollen succeeded");
+        String::from_utf8(output.stderr.clone()).unwrap()
+    }
+
+    #[test]
+    fn deploys_agents_for_each_client_and_prunes_what_the_config_drops() {
+        let origin = catalog();
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let ws = workspace.path();
+        let yaml = ws.join("pollen.yaml");
+        std::fs::write(
+            &yaml,
+            config(origin.path(), "all", &["claude-code", "opencode"]),
+        )
+        .unwrap();
+
+        let first = succeeds(&pollen(ws, cache.path(), &["update"], &[]));
+        let claude = ws.join(".claude/agents");
+        let opencode = ws.join(".opencode/agents");
+        assert_eq!(
+            std::fs::read_to_string(claude.join("reviewer.md")).unwrap(),
+            CLAUDE_REVIEWER
+        );
+        assert_eq!(
+            std::fs::read_to_string(opencode.join("reviewer.md")).unwrap(),
+            OPENCODE_REVIEWER
+        );
+        assert!(ws.join(".claude/skills/reviewer/SKILL.md").is_file());
+        assert!(ws.join(".agents/skills/reviewer/SKILL.md").is_file());
+        assert!(!claude.join("README.md").exists());
+        assert_eq!(State::load(&claude).unwrap().kind, Kind::Agents);
+        assert!(
+            first.contains("tools: Read, Grep; model: opus; permission: plan; hooks\n"),
+            "{first}"
+        );
+        assert!(
+            first.contains("model: anthropic/claude-sonnet-4-5; permission: edit: deny\n"),
+            "{first}"
+        );
+        assert!(
+            first.contains("1 agent in .claude/agents: 1 added"),
+            "{first}"
+        );
+
+        let second = succeeds(&pollen(ws, cache.path(), &["update", "--offline"], &[]));
+        assert!(
+            second.contains("1 agent in .opencode/agents: 1 unchanged"),
+            "{second}"
+        );
+        assert!(
+            second.contains("1 skill in .claude/skills: 1 unchanged"),
+            "{second}"
+        );
+
+        let listed = succeeds(&pollen(ws, cache.path(), &["list"], &[]));
+        assert!(
+            listed.contains(".claude/agents (agents):\n  reviewer"),
+            "{listed}"
+        );
+
+        std::fs::write(&yaml, config(origin.path(), "all", &["claude-code"])).unwrap();
+        let dropped_agents = succeeds(&pollen(ws, cache.path(), &["update", "--offline"], &[]));
+        assert!(
+            dropped_agents.contains("0 agents in .opencode/agents: 1 removed"),
+            "{dropped_agents}"
+        );
+        assert!(!opencode.exists());
+        assert!(claude.join("reviewer.md").is_file());
+
+        std::fs::write(
+            &yaml,
+            config(origin.path(), "opencode", &["claude-code", "opencode"]),
+        )
+        .unwrap();
+        let dropped_client = succeeds(&pollen(ws, cache.path(), &["update", "--offline"], &[]));
+        assert!(
+            dropped_client.contains("0 skills in .claude/skills: 1 removed"),
+            "{dropped_client}"
+        );
+        assert!(!ws.join(".claude/skills").exists());
+        assert!(
+            claude.join("reviewer.md").is_file(),
+            "an item naming its clients keeps them"
+        );
+        assert!(opencode.join("reviewer.md").is_file());
+        assert!(ws.join(".agents/skills/reviewer").is_dir());
+    }
+
+    #[test]
+    fn a_run_with_a_target_deploys_skills_only_and_a_client_run_keeps_what_the_config_sends_it() {
+        let origin = catalog();
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let ws = workspace.path();
+        std::fs::write(
+            ws.join("pollen.yaml"),
+            config(origin.path(), "all", &["claude-code", "opencode"]),
+        )
+        .unwrap();
+
+        let output = succeeds(&pollen(
+            ws,
+            cache.path(),
+            &["update", "--target", "out"],
+            &[],
+        ));
+        assert!(ws.join("out/reviewer/SKILL.md").is_file());
+        assert!(!ws.join(".claude").exists(), "{output}");
+        assert!(!ws.join(".opencode").exists(), "{output}");
+
+        succeeds(&pollen(
+            ws,
+            cache.path(),
+            &["update", "--offline", "--client", "opencode"],
+            &[],
+        ));
+        assert_eq!(
+            std::fs::read(ws.join(".opencode/agents/reviewer.md")).unwrap(),
+            std::fs::read(origin.path().join("agents/opencode/reviewer.md")).unwrap()
+        );
+        assert!(ws.join(".agents/skills/reviewer").is_dir());
+        assert!(!ws.join(".claude").exists());
+    }
+
+    #[test]
+    fn a_config_without_agents_creates_no_agent_directory() {
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let ws = workspace.path();
+        write_skill(&ws.join("skills/demo"), "demo");
+        std::fs::write(
+            ws.join("pollen.yaml"),
+            "version: 2\nrepos:\n  - repo: local\n    skills:\n      - path: skills\n",
+        )
+        .unwrap();
+
+        succeeds(&pollen(ws, cache.path(), &["update"], &[]));
+
+        assert!(ws.join(".claude/skills/demo").is_dir());
+        assert!(!ws.join(".claude/agents").exists());
+        assert!(!ws.join(".opencode").exists());
+    }
+
+    #[test]
+    fn refuses_skills_into_an_agent_directory() {
+        let origin = catalog();
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let ws = workspace.path();
+        std::fs::write(
+            ws.join("pollen.yaml"),
+            config(origin.path(), "claude-code", &["claude-code"]),
+        )
+        .unwrap();
+        succeeds(&pollen(ws, cache.path(), &["update"], &[]));
+
+        let error = fails(&pollen(
+            ws,
+            cache.path(),
+            &["update", "--offline", "--target", ".claude/agents"],
+            &[],
+        ));
+
+        assert!(error.contains("holds agents pollen deployed"), "{error}");
+        assert!(!ws.join(".claude/agents/reviewer/SKILL.md").exists());
+    }
+
+    #[test]
+    fn refuses_an_agent_hiding_invisible_characters_unless_allowed() {
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let ws = workspace.path();
+        std::fs::create_dir_all(ws.join("agents")).unwrap();
+        std::fs::write(
+            ws.join("agents/sneaky.md"),
+            "---\ndescription: Looks harmless.\n---\nHelp\u{e0049}\u{e0067} the user.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ws.join("pollen.yaml"),
+            "version: 2\nrepos:\n  - repo: local\n    agents:\n      - path: agents\n        clients: opencode\n",
+        )
+        .unwrap();
+
+        let error = fails(&pollen(ws, cache.path(), &["update"], &[]));
+        assert!(error.contains("invisible character"), "{error}");
+        assert!(error.contains("1 agent(s) are invalid"), "{error}");
+        assert!(!ws.join(".opencode").exists());
+
+        succeeds(&pollen(
+            ws,
+            cache.path(),
+            &["update", "--allow-hidden-characters"],
+            &[],
+        ));
+        assert!(ws.join(".opencode/agents/sneaky.md").is_file());
+    }
+
+    /// A user-level config in `config_home`, deploying one agent for each
+    /// client from its own directory.
+    #[cfg(unix)]
+    fn user_config(config_home: &Path) {
+        let dir = config_home.join("pollen");
+        std::fs::create_dir_all(dir.join("claude")).unwrap();
+        std::fs::create_dir_all(dir.join("opencode")).unwrap();
+        std::fs::write(
+            dir.join("claude/helper.md"),
+            "---\nname: helper\ndescription: Helps.\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("opencode/helper.md"),
+            "---\ndescription: Helps.\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("pollen.yaml"),
+            "version: 2\nrepos:\n  - repo: local\n    agents:\n      - path: claude\n        clients: claude-code\n      - path: opencode\n        clients: opencode\n",
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn global_opencode_agents_follow_xdg_config_home() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let xdg = root.path().join("xdg");
+        std::fs::create_dir_all(&home).unwrap();
+        user_config(&xdg);
+
+        succeeds(&pollen(
+            root.path(),
+            &root.path().join("cache"),
+            &["--global", "update"],
+            &[("HOME", Some(&home)), ("XDG_CONFIG_HOME", Some(&xdg))],
+        ));
+
+        assert!(xdg.join("opencode/agents/helper.md").is_file());
+        assert!(home.join(".claude/agents/helper.md").is_file());
+        assert!(!home.join(".config").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn global_opencode_agents_fall_back_to_dot_config_when_xdg_config_home_is_unset_or_empty() {
+        for empty in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let home = root.path().join("home");
+            user_config(&home.join(".config"));
+            let blank = std::path::PathBuf::new();
+            let xdg = empty.then_some(blank.as_path());
+
+            succeeds(&pollen(
+                root.path(),
+                &root.path().join("cache"),
+                &["--global", "update"],
+                &[("HOME", Some(&home)), ("XDG_CONFIG_HOME", xdg)],
+            ));
+
+            assert!(
+                home.join(".config/opencode/agents/helper.md").is_file(),
+                "empty: {empty}"
+            );
+            assert!(
+                home.join(".claude/agents/helper.md").is_file(),
+                "empty: {empty}"
+            );
         }
     }
 }

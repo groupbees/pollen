@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -13,14 +13,37 @@ class Action(StrEnum):
     REMOVED = "removed"
 
 
+class Kind(StrEnum):
+    """What a directory pollen deploys into holds."""
+
+    SKILLS = "skills"
+    AGENTS = "agents"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AgentDetails:
+    """What an agent's frontmatter grants, each value on one line as written."""
+
+    tools: str | None
+    model: str | None
+    permission: str | None
+    """Claude Code's `permissionMode`, else OpenCode's `permission` rules."""
+    hooks: bool
+    """Whether it declares `hooks`, which run shell commands."""
+    mcp_servers: bool
+    """Whether it declares `mcpServers`."""
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Change:
-    """What happened to one skill in one target directory."""
+    """What happened to one skill or agent in one target directory."""
 
     action: Action
     name: str
     origin: str
-    """Where the skill comes from, empty for a removal."""
+    """Where the skill or agent comes from, empty for a removal."""
+    details: AgentDetails | None = None
+    """What an agent's frontmatter grants; `None` for a skill and for a removal."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -28,8 +51,9 @@ class Summary:
     """The result of an update in one target directory."""
 
     target: Path
+    kind: Kind
     changes: list[Change]
-    """One entry per skill, ordered by name within each action."""
+    """One entry per skill or agent, ordered by name within each action."""
     dry_run: bool
 
 
@@ -61,11 +85,27 @@ class InstalledSkill:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class InstalledAgent:
+    """One agent pollen deployed, as its directory records it."""
+
+    name: str
+    repo: str
+    revision: str | None
+    commit: str | None
+    source_path: str
+    checksum: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Deployed:
-    """The skills pollen manages in one target directory."""
+    """The skills or agents pollen manages in one directory."""
 
     target: Path
+    kind: Kind
     skills: list[InstalledSkill]
+    """The skills of a directory of skills, empty for one of agents."""
+    agents: list[InstalledAgent] = field(default_factory=list[InstalledAgent])
+    """The agents of a directory of agents, empty for one of skills."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -82,6 +122,18 @@ class PlannedSkill:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class PlannedAgent:
+    """One agent a config selects."""
+
+    name: str
+    repo: str
+    revision: str | None
+    commit: str | None
+    source_path: str
+    details: AgentDetails
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Validation:
     """What checking a config found."""
 
@@ -89,6 +141,8 @@ class Validation:
     sources: int
     skills: list[PlannedSkill] | None
     """The skills the sources yield, `None` when only the file was checked."""
+    agents: list[PlannedAgent] | None = None
+    """The agents the sources yield, `None` when only the file was checked."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -196,6 +250,19 @@ class ListedSkill:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ListedAgent:
+    """One agent file found in a source; `error` is set when it is invalid for `client`."""
+
+    path: str
+    client: str
+    """The client whose rules it was checked against."""
+    name: str | None
+    description: str | None
+    details: AgentDetails | None
+    error: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Listing:
     """What one git source provides at one revision."""
 
@@ -204,3 +271,5 @@ class Listing:
     release: str | None
     commit: str
     skills: list[ListedSkill]
+    agents: list[ListedAgent] = field(default_factory=list[ListedAgent])
+    """The agents of the directories asked for, in that order, then by path."""

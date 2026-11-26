@@ -1,6 +1,6 @@
 ---
 title: Configuration file
-description: Every key of pollen.yaml, how skills are discovered, and the JSON Schema.
+description: Every key of pollen.yaml, how skills and agents are discovered, and the JSON Schema.
 sidebar:
   order: 1
 ---
@@ -20,6 +20,8 @@ repos:
   - repo: local
     skills:
       - path: skills
+    agents:
+      - path: agents
 discovery:
   - url: https://gateway.example.com
     skills:
@@ -31,19 +33,25 @@ A file takes its skills from two kinds of sources, each with a list of its
 own: `repos`, git repositories and the config's own directory, which list
 where to look under `skills`, by `path`; and `discovery`, origins serving a
 discovery index, which list the skills of the index under `skills`, by `name`.
-A file needs at least one of the two lists.
+A file needs at least one of the two lists. A `repo` also lists directories of
+[agent definitions](#agents) under `agents`.
 
 | Key | Required | Default | Description |
 | --- | --- | --- | --- |
 | `version` | no | `1` | The [format version](#format-versions) the file is written in. This page describes version 2. |
-| `clients` | no | `all` | Version 2 only. The clients an entry naming neither `clients` nor `targets` deploys for, as one value or a list: `all`, `claude-code` (skills in `.claude/skills`) or `opencode` (skills in `.agents/skills`, the directory most other Agent Skills clients scan too). The directories are in the working directory, or in the home directory with `--global`. `all` is every client this pollen knows. |
+| `clients` | no | `all` | Version 2 only. The clients an entry naming neither `clients` nor `targets` deploys for, as one value or a list: `all`, `claude-code` (skills in `.claude/skills`, agents in `.claude/agents`) or `opencode` (skills in `.agents/skills`, the directory most other Agent Skills clients scan too, agents in `.opencode/agents`). The directories are in the working directory, or the user's with `--global`. `all` is every client this pollen knows. |
 | `repos[].repo` | yes | — | A git URL, a path to a git repository, or `local` for the directory holding the config file. |
 | `repos[].revision` | for git | — | Tag, branch or commit to check out. A branch draws a warning, since each update deploys whatever it points to then; a full commit SHA is the only revision that cannot move (`pollen validate --pinned` enforces it). Forbidden on `local`. |
+| `repos[].skills` | unless `agents` | — | Where to look for skills; a `repo` needs `skills`, `agents`, or both. |
 | `repos[].skills[].path` | yes | — | Directory to search, relative to the source root. Write it with `/`, which every platform reads. |
 | `repos[].skills[].recurse` | no | `false` | Search the whole subtree instead of the immediate children. |
 | `repos[].skills[].exclude` | no | — | Regular expression rejecting skills whose path under `path` matches. |
 | `repos[].skills[].clients` | no | the top-level `clients` | The clients these skills are deployed for, as one value or a list, with the values of the top-level `clients`. Forbidden with `targets`. |
 | `repos[].skills[].targets` | no | — | Directories these skills are deployed into, instead of any client's skill directory; each gets a full copy. A leading `~` is expanded (`~/` everywhere, `~\` on Windows too); a relative path resolves against the working directory, so a user-level config should use `~` paths. Forbidden with `clients`. |
+| `repos[].agents[].path` | yes | — | Directory holding agent files, relative to the source root: every file directly under it ending in `.md` is an agent, named after the file. Subdirectories are not searched. |
+| `repos[].agents[].exclude` | no | — | Regular expression rejecting agents whose name, the file name without `.md`, matches. |
+| `repos[].agents[].clients` | no | the top-level `clients` | The clients these agents are deployed for, as `repos[].skills[].clients`: into each one's agent directory, checked against each one's rules. Forbidden with `targets`. |
+| `repos[].agents[].targets` | no | — | Directories these agents are deployed into, instead of any client's agent directory, as `repos[].skills[].targets`. Forbidden with `clients`. |
 | `discovery[].url` | yes | — | An origin, `https://host[:port]` with no path, serving an [Agent Skills discovery index](/guides/well-known-sources/). |
 | `discovery[].exclude` | no | — | Regular expression rejecting the skills of the index whose name matches. Forbidden with `skills`. |
 | `discovery[].clients` | no | the top-level `clients` | The clients the origin's skills are deployed for, as `repos[].skills[].clients`. Forbidden with `targets`. |
@@ -63,11 +71,53 @@ resolution. A child directory symlink resolving outside the root refuses the run
 Links within the root retain their selected name and path. Excluded candidates
 are not selected and do not enter this check.
 
+## Agents
+
+An agent definition is one Markdown file whose YAML frontmatter configures a
+subagent and whose body is its prompt. pollen copies it byte for byte into the
+agent directory of each client its item deploys for, and never translates it
+from one client's format to another's:
+
+| Client | Agent directory | With `--global` | Named after | Required fields |
+| --- | --- | --- | --- | --- |
+| `claude-code` | `.claude/agents` | `~/.claude/agents` | its `name`, which must equal the file name | `name`, `description` |
+| `opencode` | `.opencode/agents` | `$XDG_CONFIG_HOME/opencode/agents`, or `~/.config/opencode/agents` when it is unset or empty, on every platform | the file name | `description` |
+
+```yaml
+version: 2
+repos:
+  - repo: https://github.com/acme/agents
+    revision: v1.4.0
+    agents:
+      - path: claude
+        clients: claude-code
+        exclude: ^README$
+      - path: opencode
+        clients: opencode
+```
+
+An item naming neither `clients` nor `targets` takes the top-level
+`clients`, `all` by default, so its files go to every client and must follow
+every client's rules: an agent written for one client needs `clients` naming
+it. A file deployed for a client follows that client's rules; one sent to
+`targets` has no client, and only needs a YAML frontmatter and a file name
+following the skill name rules. Every agent file must hold no invisible
+character. A `.md` file that breaks a rule fails the run, naming the client
+whose rule it breaks; `exclude` leaves out a `README.md` or any file that is
+not an agent. Agents directly under `path` only are taken, so agents nested in
+a subdirectory, which OpenCode names after their path, are not deployed.
+
+A directory holds skills or agents, never both: a run sending both to one
+directory fails, and the `.pollen.json` of a directory records which it holds,
+so pollen refuses to deploy the other kind there. A skill and an agent, or one
+agent in two directories, may share a name. `discovery` origins deploy skills
+only.
+
 ## Where the skills go
 
-Each item of a `repo`'s `skills` and each `discovery` origin names where its
-skills go: `clients`, the clients to deploy them for, or `targets`, directories
-of their own, never both. An entry naming neither takes the top-level
+Each item of a `repo`'s `skills` or `agents` and each `discovery` origin names
+where its skills or agents go: `clients`, the clients to deploy them for, or
+`targets`, directories of their own, never both. An entry naming neither takes the top-level
 `clients`, which defaults to `all`, so by default every skill goes to both
 `.claude/skills` and `.agents/skills`. Set the top-level `clients` to deploy
 for some clients only — Claude Code alone, here, in the project or under the
@@ -104,15 +154,16 @@ directory, or through `targets`. Each directory gets a full copy of the skills
 sent to it, and two entries sending one skill name to the same directory is an
 error.
 
-An update also visits each client skill directory, in the project or under the
-home directory with `--global`, whose `.pollen.json` names this config, and
+An update also visits each client skill and agent directory, in the project
+or the user's with `--global`, whose `.pollen.json` names this config, and
 prunes what the config does not send there: dropping a client, or moving an
 entry from `clients` to `targets`, removes what pollen deployed in that
 client's directory. A directory left with nothing pollen deployed loses its
 `.pollen.json`, and is removed when empty. A directory only `targets` named
 keeps its skills once no entry names it. For one run, `--target` replaces
-every entry's destination, and `--client` keeps only what the entries send to
-those clients; that run visits no other directory.
+every entry's destination and deploys skills only, and `--client` keeps only
+the skills and agents the entries send to those clients; that run visits no
+other directory.
 
 A
 [JSON Schema](https://github.com/groupbees/pollen/blob/main/schema/pollen.schema.json)
@@ -125,7 +176,7 @@ describes the file. Point your editor at it for completion and inline errors, by
 
 `pollen schema` prints the same document, for a validator that wants it on
 stdin. It covers the file's shape; `pollen validate` goes further and checks
-the sources and the skills themselves (see [Usage](/guides/usage/)).
+the sources, the skills and the agents themselves (see [Usage](/guides/usage/)).
 
 ## Format versions
 
@@ -139,7 +190,7 @@ removed, or changes meaning; a new optional key does not move it.
 | Version | Read by | Change |
 | --- | --- | --- |
 | 1 | every release | The original format: a `repo` lists where to look under `paths`. |
-| 2 | pollen 0.8 and later | A `repo` lists where to look under `skills`. The origins serving a discovery index move out of `repos` to a list of their own, `discovery`, each naming its origin under `url`. Each item of `skills` and each `discovery` origin names its destination with `clients` or `targets`, and the top-level `clients` covers the entries naming neither, with no top-level `targets`. |
+| 2 | pollen 0.8 and later | A `repo` lists where to look under `skills`. The origins serving a discovery index move out of `repos` to a list of their own, `discovery`, each naming its origin under `url`. Each item of `skills` and each `discovery` origin names its destination with `clients` or `targets`, and the top-level `clients` covers the entries naming neither, with no top-level `targets`. A `repo` lists agent files under `agents`. |
 
 `pollen config migrate` rewrites a file in the newest version, in place:
 comments and layout are kept, a top-level `targets` is copied onto every

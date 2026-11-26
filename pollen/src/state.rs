@@ -13,24 +13,52 @@ use serde::{Deserialize, Serialize};
 /// Name of the state file inside the target directory.
 pub const STATE_FILE: &str = ".pollen.json";
 
-const CURRENT_VERSION: u32 = 1;
+/// The version this pollen writes. Version 1 has no `kind`, and holds skills.
+const CURRENT_VERSION: u32 = 2;
 
-/// The record of every skill pollen owns in one target directory.
+/// What a directory pollen deploys into holds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// Skill directories.
+    #[default]
+    Skills,
+    /// Agent files.
+    Agents,
+}
+
+impl Kind {
+    /// The word for one entry of this kind, and for several.
+    #[must_use]
+    pub const fn nouns(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Skills => ("skill", "skills"),
+            Self::Agents => ("agent", "agents"),
+        }
+    }
+}
+
+/// The record of every skill or agent pollen owns in one target directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct State {
     /// Schema version of this file.
     pub version: u32,
+    /// What the directory holds. A directory holds one kind, so skills are
+    /// never deployed where agents are, nor the other way round.
+    #[serde(default)]
+    pub kind: Kind,
     /// The config file that deploys into this directory. One target has one
     /// owner: an update prunes whatever its config does not declare, so a
     /// second config would remove the first one's skills.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<PathBuf>,
-    /// Installed skills, keyed by the name they are deployed under.
-    pub skills: BTreeMap<String, InstalledSkill>,
+    /// Installed skills or agents, keyed by the name they are deployed under.
+    #[serde(alias = "skills")]
+    pub entries: BTreeMap<String, InstalledSkill>,
 }
 
-/// One deployed skill, and where it came from.
+/// One deployed skill or agent, and where it came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledSkill {
@@ -51,25 +79,43 @@ pub struct InstalledSkill {
 
 impl Default for State {
     fn default() -> Self {
-        Self {
-            version: CURRENT_VERSION,
-            config: None,
-            skills: BTreeMap::new(),
-        }
+        Self::new(Kind::Skills)
     }
 }
 
 impl State {
-    /// Read the state of `target`, defaulting to empty when there is none.
+    /// An empty state for a directory holding `kind`.
+    #[must_use]
+    pub const fn new(kind: Kind) -> Self {
+        Self {
+            version: CURRENT_VERSION,
+            kind,
+            config: None,
+            entries: BTreeMap::new(),
+        }
+    }
+
+    /// Read the state of `target`, defaulting to empty, for skills, when
+    /// there is none.
     ///
     /// # Errors
     ///
     /// When the file cannot be read, is corrupt, was written by a newer
-    /// pollen, or contains an invalid managed skill name.
+    /// pollen, or contains an invalid managed name.
     pub fn load(target: &Path) -> Result<Self> {
+        Ok(Self::read(target)?.unwrap_or_default())
+    }
+
+    /// Read the state of `target`, `None` when it has none.
+    ///
+    /// # Errors
+    ///
+    /// When the file cannot be read, is corrupt, was written by a newer
+    /// pollen, or contains an invalid managed name.
+    pub fn read(target: &Path) -> Result<Option<Self>> {
         let path = Self::path(target);
         if !path.is_file() {
-            return Ok(Self::default());
+            return Ok(None);
         }
 
         let text = std::fs::read_to_string(&path)
@@ -81,15 +127,15 @@ impl State {
             )
         })?;
         anyhow::ensure!(
-            state.version == CURRENT_VERSION,
+            state.version <= CURRENT_VERSION,
             "{} was written by a newer pollen (state version {}); upgrade pollen",
             path.display(),
             state.version
         );
         state
-            .validate_skill_names()
-            .with_context(|| format!("{} contains unsafe managed skill names", path.display()))?;
-        Ok(state)
+            .validate_names()
+            .with_context(|| format!("{} contains unsafe managed names", path.display()))?;
+        Ok(Some(state))
     }
 
     /// Write the state of `target`, atomically.
@@ -100,11 +146,14 @@ impl State {
     /// be created or written to.
     pub fn save(&self, target: &Path) -> Result<()> {
         let path = Self::path(target);
-        self.validate_skill_names()
-            .with_context(|| format!("{} contains unsafe managed skill names", path.display()))?;
+        self.validate_names()
+            .with_context(|| format!("{} contains unsafe managed names", path.display()))?;
         std::fs::create_dir_all(target)
             .with_context(|| format!("cannot create {}", target.display()))?;
-        let text = serde_json::to_string_pretty(self)?;
+        let text = serde_json::to_string_pretty(&Self {
+            version: CURRENT_VERSION,
+            ..self.clone()
+        })?;
 
         let mut staging = tempfile::Builder::new()
             .prefix(".pollen-state-")
@@ -124,11 +173,28 @@ impl State {
         target.join(STATE_FILE)
     }
 
+    /// Remove the state file of `target`, if it has one.
+    ///
+    /// # Errors
+    ///
+    /// When the file exists but cannot be removed.
+    pub fn remove(target: &Path) -> Result<()> {
+        let path = Self::path(target);
+        match std::fs::remove_file(&path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                Err(error).with_context(|| format!("cannot remove {}", path.display()))
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Refuse unsafe identities before they reach target writes or pruning.
-    fn validate_skill_names(&self) -> Result<()> {
-        for name in self.skills.keys() {
+    /// Skills and agents follow the same rules, so a name never holds a path
+    /// separator.
+    fn validate_names(&self) -> Result<()> {
+        for name in self.entries.keys() {
             crate::skill::validate_name(name)
-                .map_err(|error| anyhow::anyhow!("unsafe managed skill name {name:?}: {error}"))?;
+                .map_err(|error| anyhow::anyhow!("unsafe managed name {name:?}: {error}"))?;
         }
         Ok(())
     }
@@ -153,19 +219,19 @@ mod tests {
     fn an_absent_state_file_reads_as_empty() {
         let target = tempfile::tempdir().unwrap();
 
-        assert!(State::load(target.path()).unwrap().skills.is_empty());
+        assert!(State::load(target.path()).unwrap().entries.is_empty());
     }
 
     #[test]
     fn round_trips_through_the_target_directory() {
         let target = tempfile::tempdir().unwrap();
         let mut state = State::default();
-        state.skills.insert("demo".to_owned(), entry());
+        state.entries.insert("demo".to_owned(), entry());
 
         state.save(target.path()).unwrap();
         let reloaded = State::load(target.path()).unwrap();
 
-        assert_eq!(reloaded.skills["demo"], entry());
+        assert_eq!(reloaded.entries["demo"], entry());
     }
 
     #[test]
@@ -174,6 +240,56 @@ mod tests {
         std::fs::write(State::path(target.path()), r#"{"version":1,"skills":{}}"#).unwrap();
 
         assert_eq!(State::load(target.path()).unwrap().config, None);
+    }
+
+    #[test]
+    fn reads_a_version_one_file_as_holding_skills_and_writes_version_two() {
+        let target = tempfile::tempdir().unwrap();
+        let recorded = serde_json::to_value(entry()).unwrap();
+        std::fs::write(
+            State::path(target.path()),
+            serde_json::json!({"version": 1, "skills": {"demo": recorded}}).to_string(),
+        )
+        .unwrap();
+
+        let state = State::load(target.path()).unwrap();
+        state.save(target.path()).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(State::path(target.path())).unwrap())
+                .unwrap();
+
+        assert_eq!(state.kind, Kind::Skills);
+        assert_eq!(state.entries["demo"], entry());
+        assert_eq!(written["version"], 2);
+        assert_eq!(written["kind"], "skills");
+        assert_eq!(written["entries"]["demo"]["sourcePath"], "mydir/demo");
+    }
+
+    #[test]
+    fn records_a_directory_of_agents() {
+        let target = tempfile::tempdir().unwrap();
+        let mut state = State::new(Kind::Agents);
+        state.entries.insert("reviewer".to_owned(), entry());
+
+        state.save(target.path()).unwrap();
+
+        assert_eq!(State::load(target.path()).unwrap().kind, Kind::Agents);
+        assert!(
+            State::read(tempfile::tempdir().unwrap().path())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn removing_an_absent_state_file_is_not_an_error() {
+        let target = tempfile::tempdir().unwrap();
+        State::new(Kind::Agents).save(target.path()).unwrap();
+
+        State::remove(target.path()).unwrap();
+        State::remove(target.path()).unwrap();
+
+        assert!(!State::path(target.path()).exists());
     }
 
     #[test]
@@ -231,7 +347,7 @@ mod tests {
     fn refuses_to_write_unsafe_managed_skill_names() {
         let target = tempfile::tempdir().unwrap();
         let mut state = State::default();
-        state.skills.insert("../outside".to_owned(), entry());
+        state.entries.insert("../outside".to_owned(), entry());
 
         let result = state.save(target.path());
 

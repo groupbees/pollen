@@ -5,68 +5,75 @@ use anyhow::Result;
 
 use crate::cli::Options;
 use crate::command::Context;
-use crate::state::{InstalledSkill, State};
+use crate::state::{InstalledSkill, Kind, State};
 
-/// The skills pollen manages in one target directory.
+/// The skills or agents pollen manages in one directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Deployed {
     pub target: PathBuf,
-    /// Its managed skills, keyed by the name they are deployed under.
-    pub skills: BTreeMap<String, InstalledSkill>,
+    /// What the directory holds: what its state file records, else what
+    /// the run would deploy into it.
+    pub kind: Kind,
+    /// Its managed entries, keyed by the name they are deployed under.
+    pub entries: BTreeMap<String, InstalledSkill>,
 }
 
 /// # Errors
 ///
-/// When the config or a target directory's state cannot be read.
+/// When the config or a directory's state cannot be read.
 pub fn run(options: &Options) -> Result<()> {
     for (index, deployed) in installed(options)?.iter().enumerate() {
         if index > 0 {
             println!();
         }
-        println!("{}:", deployed.target.display());
+        match deployed.kind {
+            Kind::Skills => println!("{}:", deployed.target.display()),
+            Kind::Agents => println!("{} (agents):", deployed.target.display()),
+        }
 
-        let width = deployed.skills.keys().map(String::len).max().unwrap_or(0);
-        for (name, skill) in &deployed.skills {
-            println!("  {name:width$}  {}  {}", origin(skill), skill.source_path);
+        let width = deployed.entries.keys().map(String::len).max().unwrap_or(0);
+        for (name, entry) in &deployed.entries {
+            println!("  {name:width$}  {}  {}", origin(entry), entry.source_path);
         }
     }
     Ok(())
 }
 
 /// Read what pollen installed in every directory an update with `options`
-/// visits: those the config's entries deploy into, and the known client
-/// directories whose state file names the config.
+/// visits: those the config's entries deploy skills or agents into, and the
+/// known client directories whose state file names the config.
 ///
 /// # Errors
 ///
-/// When the config or a target directory's state cannot be read.
+/// When the config or a directory's state cannot be read.
 pub fn installed(options: &Options) -> Result<Vec<Deployed>> {
     let context = Context::open(options)?;
     context
         .directories()
         .into_iter()
-        .map(|target| {
-            let state = State::load(&target)?;
-            tracing::debug!(target = %target.display(), count = state.skills.len(), "installed skills");
+        .map(|(target, kind)| {
+            let state = State::read(&target)?.unwrap_or_else(|| State::new(kind));
+            tracing::debug!(target = %target.display(), count = state.entries.len(), "installed");
             Ok(Deployed {
                 target,
-                skills: state.skills,
+                kind: state.kind,
+                entries: state.entries,
             })
         })
         .collect()
 }
 
-fn origin(skill: &InstalledSkill) -> String {
-    match (&skill.revision, &skill.commit) {
+fn origin(entry: &InstalledSkill) -> String {
+    match (&entry.revision, &entry.commit) {
         (Some(revision), Some(commit)) => format!(
             "{}@{revision} ({})",
-            skill.repo,
+            entry.repo,
             &commit[..commit.len().min(8)]
         ),
-        (Some(revision), None) => format!("{}@{revision}", skill.repo),
-        _ => match &skill.digest {
-            Some(digest) => format!("{} ({})", skill.repo, &digest[..digest.len().min(15)]),
-            None => skill.repo.clone(),
+        (Some(revision), None) => format!("{}@{revision}", entry.repo),
+        _ => match &entry.digest {
+            Some(digest) => format!("{} ({})", entry.repo, &digest[..digest.len().min(15)]),
+            None => entry.repo.clone(),
         },
     }
 }

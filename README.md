@@ -14,8 +14,8 @@
 </p>
 
 Deploy [Agent Skills](https://agentskills.io) from git repositories, local
-directories and well-known discovery indexes, declaratively, from a single
-`pollen.yaml`.
+directories and well-known discovery indexes, and agent definitions beside
+them, declaratively, from a single `pollen.yaml`.
 
 ## Description
 
@@ -33,10 +33,18 @@ Skills client scans — so one `pollen update` serves every Agent Skills client
 without configuring anything. A skill folder that also carries a `.claude-plugin/plugin.json` is
 copied whole, so plugin-shaped skills keep working too.
 
+A repository can also list directories of subagent definitions, Markdown files
+whose frontmatter grants tools and permissions. pollen copies each as is into
+`.claude/agents/` for Claude Code and `.opencode/agents/` for OpenCode, checks
+it against the rules of each client it goes to, and prints what it grants, so
+the most privileged text an agent reads gets the same pinning, pruning and
+review as a skill.
+
 What it is not: a registry, a package manager with dependency resolution, or a
 skill authoring tool. It moves directories that already exist, validates
 them against the specification and refuses any that hides invisible
-characters.
+characters. It never translates an agent from one client's format to
+another's.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the reasoning behind
 it.

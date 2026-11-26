@@ -1,6 +1,6 @@
 ---
 title: Usage
-description: Deploy, preview, validate, list and inspect skills with the pollen commands.
+description: Deploy, preview, validate, list and inspect skills and agents with the pollen commands.
 sidebar:
   order: 2
 ---
@@ -17,7 +17,23 @@ See what would change first:
 pollen update --dry-run
 ```
 
-Check the config and every skill it selects, without deploying:
+`update` prints one block per directory it writes or prunes, and under each
+agent what its frontmatter grants — tools, model, permission, and whether it
+declares hooks or MCP servers — since that is what an agent is allowed to do:
+
+```console
+$ pollen update
++ review-guide  local skills/review-guide
+1 skill in .claude/skills: 1 added
+
++ planner   local agents/planner.md
+            model: sonnet
++ reviewer  local agents/reviewer.md
+            tools: Read, Grep, Glob; model: opus; permission: plan; hooks
+2 agents in .claude/agents: 2 added
+```
+
+Check the config and every skill and agent it selects, without deploying:
 
 ```sh
 pollen validate
@@ -30,9 +46,12 @@ selectors, fillers and terminal control codes. Such characters are how a skill
 smuggles in instructions nobody approved, so `update`, `validate` and `show`
 refuse it, naming the file and where the first one sits. Emoji sequences,
 Persian or Indic joiners and a byte order mark opening a file are allowed.
+An agent file is checked the same way, and is invalid too when it breaks the
+rules of a client it is deployed for (see
+[Agents](/reference/configuration/#agents)).
 
 For a source you trust, `--allow-hidden-characters` makes `update` and
-`validate` accept such a skill, logging a warning for each file. The flag
+`validate` accept such a skill or agent, logging a warning for each file. The flag
 lowers the check for every source; when one skill is at fault, `exclude` it
 instead.
 
@@ -118,9 +137,24 @@ pollen show https://github.com/groupbees/pollen --format json
 
 It reads the newest release unless `--revision` names another (`HEAD` when the
 source has none), lists invalid skills with their error instead of stopping,
-and writes nothing.
+and writes nothing. With no config to say which client a directory of agents
+is written for, `--agents CLIENT:PATH` names it: the agent files directly under
+`PATH` are listed, checked against `CLIENT`'s rules, each with what its
+frontmatter grants:
 
-List what is currently deployed:
+```console
+$ pollen show https://github.com/acme/agents --agents claude-code:claude
+https://github.com/acme/agents @ v1.4.0 (06fcca9e)
+  claude/docs.md      invalid agent: for claude-code, the frontmatter needs `name`, a non-empty string
+  claude/planner.md   claude-code agent: Plans work.
+                      model: sonnet
+  claude/reviewer.md  claude-code agent: Reviews code.
+                      tools: Read, Grep, Glob; model: opus; permission: plan; hooks
+0 skill(s); 2 agent(s), 1 invalid
+pin with: revision: 06fcca9e695383cad0f846abe1740f6392190683  # v1.4.0
+```
+
+List what is currently deployed, skills and agents:
 
 ```sh
 pollen list
@@ -134,9 +168,11 @@ pollen schema
 
 Deploy somewhere else for this run only, into directories of your own in
 place of every entry's `clients` or `targets`, or for some clients only:
-`--client` deploys what the config sends to those clients and nothing else,
-so an entry sent to other clients or to `targets` is left out. Such a run
-visits no other directory, so it prunes nothing elsewhere:
+`--client` deploys the skills and agents the config sends to those clients
+and nothing else, so an entry sent to other clients or to `targets` is left
+out. Such a run visits no other directory, so it prunes nothing elsewhere.
+`--target` deploys skills only, so a run into a scratch directory never
+touches an agent directory:
 
 ```sh
 pollen update --target ~/.claude/skills --target ~/.agents/skills
@@ -153,17 +189,21 @@ pollen update --global
 `~/.config/pollen/pollen.yaml` when the variable is unset, on macOS too, and
 `%APPDATA%\pollen\pollen.yaml` on Windows — and takes the skill directories
 of its clients under the home directory, so an entry naming no `targets`
-deploys into `~/.claude/skills` and `~/.agents/skills` by default. It works
+deploys into `~/.claude/skills` and `~/.agents/skills` by default. Agents go
+to `~/.claude/agents` and `$XDG_CONFIG_HOME/opencode/agents`, or
+`~/.config/opencode/agents` when the variable is unset or empty — on Windows
+too, where OpenCode follows the same layout. It works
 with every command (`pollen list -g`, `pollen validate -g`) and cannot be
 combined with `--config`.
 
 A target directory belongs to one config: an update prunes whatever its config
 no longer declares, so a second config deploying into the same directory would
-remove the first one's skills. `pollen update` therefore refuses a directory
+remove the first one's skills or agents. `pollen update` therefore refuses a directory
 another config manages and names that config; declare the sources there, or
 pass `--force` to hand the directory over.
 
-Managed names in `.pollen.json` follow the same rules as skill names. A path such
+Managed names in `.pollen.json`, skills and agents alike, follow the same
+rules as skill names. A path such
 as `../outside` refuses that target before installing, pruning or sweeping
 staging material. Preserve the state file and review the invalid record before
 another attempt. Neither `--force` nor `--dry-run` bypasses this validation.

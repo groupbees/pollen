@@ -1,8 +1,9 @@
-//! Putting a skill directory in place, and taking it back out.
+//! Putting a skill directory or an agent file in place, and taking it back
+//! out.
 //!
 //! Every install is staged next to its destination and moved in with a
-//! rename, so a run that dies halfway never leaves a half-copied skill for an
-//! agent to load.
+//! rename, so a run that dies halfway never leaves a half-copied skill or
+//! agent for a client to load.
 
 use std::path::{Path, PathBuf};
 
@@ -46,6 +47,67 @@ pub fn checksum(dir: &Path) -> Result<String> {
         hasher.update(&contents);
     }
     Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+}
+
+/// Fingerprint of an agent file: its bytes.
+///
+/// # Errors
+///
+/// When the file cannot be read.
+pub fn checksum_file(file: &Path) -> Result<String> {
+    let contents =
+        std::fs::read(file).with_context(|| format!("cannot read {}", file.display()))?;
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(&contents))))
+}
+
+/// Replace the file `destination` with a copy of `source`, in one rename.
+///
+/// The copy is staged under a dot-prefixed name without the agent
+/// extension, so a client scanning the directory never loads it.
+///
+/// # Errors
+///
+/// When the copy or the rename fails; the previous version is then left in
+/// place.
+pub fn install_file(source: &Path, destination: &Path) -> Result<()> {
+    let parent = destination
+        .parent()
+        .context("the destination has no parent directory")?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("cannot create {}", parent.display()))?;
+    let stem = destination
+        .file_stem()
+        .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
+
+    let staged = tempfile::Builder::new()
+        .prefix(&format!("{STAGING_PREFIX}{stem}-"))
+        .tempfile_in(parent)
+        .with_context(|| format!("cannot stage an install in {}", parent.display()))?
+        .into_temp_path();
+    // `copy` rather than writing through the temporary file, which is
+    // created owner-only: the agent keeps the permissions of its source.
+    std::fs::copy(source, &staged).with_context(|| format!("cannot copy {}", source.display()))?;
+    staged.persist(destination).map_err(|error| {
+        anyhow::Error::new(error.error).context(format!(
+            "cannot move {} into place at {}",
+            error.path.display(),
+            destination.display()
+        ))
+    })
+}
+
+/// Delete an installed agent file.
+///
+/// # Errors
+///
+/// When the file exists but cannot be deleted.
+pub fn remove_file(destination: &Path) -> Result<()> {
+    match std::fs::remove_file(destination) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(error).with_context(|| format!("cannot remove {}", destination.display()))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Replace `destination` with a copy of `source`.
@@ -123,8 +185,12 @@ pub fn sweep_staging(target: &Path) -> Result<()> {
             continue;
         };
         if name.starts_with(STAGING_PREFIX) || name.starts_with(REPLACED_PREFIX) {
-            tracing::debug!(path = %path.display(), "removing a leftover staging directory");
-            std::fs::remove_dir_all(&path).ok();
+            tracing::debug!(path = %path.display(), "removing a leftover staging entry");
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path).ok();
+            } else {
+                std::fs::remove_file(&path).ok();
+            }
         }
     }
     Ok(())
@@ -249,6 +315,78 @@ mod tests {
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(remaining, ["keep-me"]);
+    }
+
+    #[test]
+    fn installs_a_file_and_replaces_it_leaving_no_staging_file() {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("one.md");
+        let second = root.path().join("two.md");
+        std::fs::write(&first, "one").unwrap();
+        std::fs::write(&second, "two").unwrap();
+        let target = root.path().join("agents");
+        let destination = target.join("reviewer.md");
+
+        install_file(&first, &destination).unwrap();
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "one");
+        install_file(&second, &destination).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "two");
+        assert_eq!(
+            checksum_file(&destination).unwrap(),
+            checksum_file(&second).unwrap()
+        );
+        let names: Vec<_> = std::fs::read_dir(&target)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["reviewer.md"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_installed_file_keeps_the_permissions_of_its_source() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("reviewer.md");
+        std::fs::write(&source, "x").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let destination = root.path().join("agents/reviewer.md");
+
+        install_file(&source, &destination).unwrap();
+
+        let mode = std::fs::metadata(&destination)
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
+    }
+
+    #[test]
+    fn a_staged_file_does_not_carry_the_agent_extension_and_is_swept() {
+        let target = tempfile::tempdir().unwrap();
+        let staged = tempfile::Builder::new()
+            .prefix(&format!("{STAGING_PREFIX}reviewer-"))
+            .tempfile_in(target.path())
+            .unwrap()
+            .into_temp_path()
+            .keep()
+            .unwrap();
+        std::fs::write(target.path().join("keep.md"), "x").unwrap();
+
+        assert!(staged.extension().is_none(), "{}", staged.display());
+        sweep_staging(target.path()).unwrap();
+
+        assert!(!staged.exists());
+        assert!(target.path().join("keep.md").is_file());
+    }
+
+    #[test]
+    fn removing_an_absent_file_is_not_an_error() {
+        let root = tempfile::tempdir().unwrap();
+
+        assert!(remove_file(&root.path().join("absent.md")).is_ok());
     }
 
     #[test]

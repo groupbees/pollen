@@ -4,9 +4,9 @@
 
 `pollen` is a one-shot CLI. A run reads `pollen.yaml`, makes every source
 it declares available on the local filesystem, works out which skill
-directories those sources select and where each entry sends them, and then
-makes each directory match what is planned for it — installing, replacing and
-removing as needed. The sources are fetched and validated once and applied to
+directories and agent files those sources select and where each entry sends
+them, and then makes each directory match what is planned for it —
+installing, replacing and removing as needed. The sources are fetched and validated once and applied to
 every directory, so deploying to two directories costs one fetch. Nothing runs in the background, and nothing is
 left behind between runs except a cache and one state file per target.
 The same engine runs behind the `pollen` binary and behind the `pollen`
@@ -22,10 +22,14 @@ flowchart LR
     source -->|"root directory"| discovery["discovery"]
     source -->|"skill directories, well-known"| skill["skill"]
     discovery -->|"candidate dirs"| skill
+    discovery -->|"agent files"| agent["agent"]
     skill -->|"validated frontmatter"| plan["plan"]
-    plan -->|"desired set, per directory"| update["update"]
-    state[("state file, one per target")] -->|"owned skills"| update
-    update -->|"copy + rename, per target"| target[(".claude/skills, .agents/skills")]
+    clients[("client table")] -->|"directories, rules per client"| plan
+    agent -->|"checked against each destination client"| plan
+    plan -->|"desired set and kind, per directory"| update["update"]
+    state[("state file, one per directory")] -->|"owned skills or agents"| update
+    update -->|"copy + rename, per directory"| skilldirs[(".claude/skills, .agents/skills")]
+    update -->|"stage + rename a file"| agentdirs[(".claude/agents, .opencode/agents")]
     update -->|"rewrite"| state
 ```
 
@@ -47,15 +51,21 @@ to a module under [pollen/src/](pollen/src/), except the last.
   version through each newer one, into the model every command reads:
   `Config` and the `Repo` enum (`Local`, `Git`, `WellKnown`), where a key
   that does not belong to its kind of source cannot be represented. Each
-  selection — an item of a `repo`'s `skills`, a discovery origin — carries
-  its `Destination`: the entry's `targets`, its `clients`, or the default,
-  the config's top-level `clients`, all of them when it names none. A
-  `Scope` holds what a run adds: the CLI's `--target`, which replaces every
+  selection — an item of a `repo`'s `skills` or `agents`, a discovery origin —
+  carries its `Destination`: the entry's `targets`, its `clients`, or the
+  default, the config's top-level `clients`, all of them when it names none.
+  A `Scope` holds what a run adds: the CLI's `--target`, which replaces every
   entry's destination, or its `--client`, which keeps only the entries'
-  clients among those it names, and where client skill directories
-  sit, the working directory, or the home directory with `--global`, which
-  also reads the user-level config. Resolving a destination in a scope gives
-  its directories, duplicates dropped. It knows nothing about git or the
+  clients among those it names, and where client directories sit, the
+  working directory, or with `--global` the home directory and the user's
+  configuration directory, which also holds the user-level config. Resolving
+  a destination in a scope gives its directories, duplicates dropped: skill
+  directories for skills, and for agents the agent directory of each client,
+  with that client, or a target with none; `--target` resolves an agents
+  item to nothing. It also holds the client table, one `ClientSpec` row per
+  client: its skill directory, its project and user agent directories, its
+  agent file extension, how it names an agent and the frontmatter fields it
+  requires. It knows nothing about git or the
   filesystem beyond reading its own file.
 - **[source](pollen/src/source.rs)** — turns one source, an entry of `repos`
   or of `discovery`, into a directory on disk, behind the `Materializer`
@@ -79,9 +89,11 @@ to a module under [pollen/src/](pollen/src/), except the last.
   helper command the file names, at most once per run, or by reading the
   variable it names. It knows nothing about HTTP.
 - **[discovery](pollen/src/discovery.rs)** — walks a materialized source and answers
-  which directories each `path` of a repo's `skills` selects. A directory
-  holding a `SKILL.md` is a skill and is never descended into, so a skill
-  that bundles reference material does not spawn phantom children.
+  which directories each `path` of a repo's `skills` selects, and which
+  files each `path` of its `agents` does. A directory holding a `SKILL.md` is
+  a skill and is never descended into, so a skill that bundles reference
+  material does not spawn phantom children. An agent is a `.md` file directly
+  under its `path`, never in a subdirectory.
 - **[schema](pollen/src/schema.rs)** — derives the JSON Schema for `pollen.yaml`
   from the same types [config/raw](pollen/src/config/raw.rs) deserialises, so the published
   schema cannot describe a file the parser would reject. One document covers
@@ -94,14 +106,24 @@ to a module under [pollen/src/](pollen/src/), except the last.
   fields, and rejecting those would refuse perfectly good skills. It also
   refuses a skill whose text files hold an invisible character, which
   [hidden](pollen/src/hidden.rs) finds.
-- **[deploy](pollen/src/deploy.rs)** — copies a skill tree and fingerprints it. Every
-  install is staged in a sibling directory and moved in with a rename, and a
-  replacement moves the previous version aside first so a failed rename can be
-  undone.
+- **[agent](pollen/src/agent.rs)** — reads an agent file and runs the checks
+  every client shares: a file name following the skill name rules, a YAML
+  mapping as frontmatter, no invisible character. Checking it against one
+  client applies that client's row: the fields it requires and, for a client
+  naming agents by their `name`, that the name equals the file name. It also
+  reads what the frontmatter grants — tools, model, permission, hooks, MCP
+  servers — for `update` and `show` to print. Unknown keys pass, and no value
+  is checked against a client's catalogue, such as its models.
+- **[deploy](pollen/src/deploy.rs)** — copies a skill tree and fingerprints it,
+  and copies an agent file and fingerprints its bytes. Every install is staged
+  beside its destination and moved in with a rename. A skill replacement moves
+  the previous version aside first so a failed rename can be undone; an agent
+  file is replaced by the rename itself, and is staged under a dot-prefixed
+  name without `.md`, so no client loads a half-written agent.
 - **[state](pollen/src/state.rs)** — the record of what `pollen` installed in one
-  target directory, and the only thing that authorises it to replace or remove
-  something. Each target carries its own, so targets never reason about each
-  other.
+  target directory, skills or agents, and the only thing that authorises it to
+  replace or remove something. Each target carries its own, so targets never
+  reason about each other.
 - **[version](pollen/src/version.rs)** — which of a remote's tags are releases
   (stable `vX.Y.Z`), which is newest, and which one a revision stands for.
   `outdated` and `autoupdate` read the tags with `git ls-remote`, without
@@ -111,10 +133,13 @@ to a module under [pollen/src/](pollen/src/), except the last.
   `autoupdate` rewrites the `revision:` and `digest:` lines in place rather
   than re-serialising the YAML, so comments and layout survive.
 - **[command](pollen/src/command.rs)** — the subcommands. `show` checks one source
-  out without any config and lists what it holds, invalid skills included.
+  out without any config and lists what it holds, invalid skills included,
+  and the agents of the directories `--agents` names, each against the client
+  it names, since without a config nothing else says which client a file is
+  written for.
   `validate` has two depths: the config file alone, which touches no network
   and is what the published pre-commit hook runs, and the full check that
-  fetches every source and reads every skill. `plan` is shared between them:
+  fetches every source and reads every skill and agent. `plan` is shared between them:
   it is the pure "what should be deployed" half, and `update` is the half that
   touches disk. Each subcommand is a function that returns its result
   (`update::report`, `list::installed`, `validate::check`,
@@ -139,25 +164,30 @@ half-applies. Each source is then materialized in order; a git source
 fetches its revision, falling back from a single-revision shallow fetch to a
 full one, and resolves it to a commit; a `well-known` source fetches its
 index, and downloads the artifacts of the skills it selects that the cache
-does not hold yet. Discovery lists the candidate directories of a git or
-`local` source, `skill` validates each, and the results accumulate into a plan
-keyed by destination directory and skill name, each skill planned for every
-directory its entry's destination resolves to. Two sources sending one name
-to the same directory is an error, not a last-one-wins; one name in two
-directories is not.
+does not hold yet. Discovery lists the candidate directories and agent files of a git or
+`local` source; `skill` validates each skill, and `agent` each agent, against
+the rules of every client its item sends it to. The results accumulate into a
+plan keyed by destination directory and name, each directory holding one
+kind, skills or agents, and each entry planned for every directory its
+destination resolves to. Two sources sending one name to the same directory
+is an error, not a last-one-wins, and so is one directory receiving both
+kinds; one name in two directories, or a skill and an agent sharing a name,
+is not.
 
 Only then does anything get written. The directories visited are those the
 entries resolve to, in the order they are first named, and, unless the CLI
-replaces every destination, each known client skill directory in scope whose
-state file names this config, so a dropped client or an entry moved to
-`targets` leaves nothing behind there. A directory nothing is planned for is
-left alone unless it has a state file. In each directory, for each skill
-planned there: a directory that exists but is not in that state file is
-refused (it is someone's own work); otherwise the source fingerprint is
-compared with both the state record and the installed tree, and a match makes
-the skill unchanged. Anything else is staged and renamed into place. Finally,
-every state entry not planned there has its directory removed, and the state
-file is rewritten — or, when nothing is left, removed along with the
+replaces every destination, each known client skill or agent directory in
+scope whose state file names this config, so a dropped client or an entry
+moved to `targets` leaves nothing behind there. A directory nothing is
+planned for is left alone unless it has a state file, so a config without
+agents creates no agent directory. A directory whose state file records the
+other kind is refused. In each directory, for each skill or agent planned
+there: an entry that exists but is not in that state file is refused (it is
+someone's own work); otherwise the source fingerprint is compared with both
+the state record and the installed copy, and a match makes it unchanged.
+Anything else is staged and renamed into place. Finally, every state entry
+not planned there is removed, as the kind its state file records, and the
+state file is rewritten — or, when nothing is left, removed along with the
 directory if it is empty.
 
 **A failure part-way through.** Skills installed before the failure stay
@@ -165,8 +195,8 @@ installed and stay recorded, in the targets already processed as well as the
 one that failed — the run is not a transaction, and does not pretend to be.
 What cannot happen is a partially copied skill in a directory:
 the rename is the only step that makes an install visible. A run killed
-between the copy and the rename leaves a `.pollen-staging-*` directory,
-which the next run sweeps.
+between the copy and the rename leaves a `.pollen-staging-*` directory, or
+file for an agent, which the next run sweeps.
 
 ## State and persistence
 
@@ -182,10 +212,13 @@ Two stores, both disposable.
   lets an unchanged skill skip the download. Deleting the cache costs a
   refetch and nothing else.
 - **The state file**, `.pollen.json` inside each directory pollen deploys
-  into, mapping each installed skill name to its source, revision, resolved
-  commit or artifact digest, and tree fingerprint, and naming the config file
-  that owns the directory, which is how a run finds the client directories it
-  must prune. A directory left with nothing installed has none. It lives
+  into, recording whether the directory holds skills or agents, mapping each
+  installed name to its source, revision, resolved commit or artifact digest,
+  and fingerprint — of the skill's tree or the agent file's bytes — and naming
+  the config file that owns the directory, which is how a run finds the
+  client directories it must prune. Its format is versioned: version 2
+  records the kind, and a version 1 file, written before agents, reads as
+  skills; pollen refuses a state file from a later version. A directory left with nothing installed has none. It lives
   with what it describes rather than next to the config,
   because the config is shared and version-controlled while what is on disk is
   a property of this machine. Deleting it makes `pollen` forget it owns
@@ -213,8 +246,11 @@ non-Claude client unserved by a tool whose whole premise is a shared format.
 
 **Clients are rows of a table.** A client is named as the product names
 itself (`claude-code`, `opencode`), never after a directory convention, and
-what pollen knows about it is data: its skill directory. There is no adapter
-trait and no client defined in `pollen.yaml`. A client the table does not
+what pollen knows about it is data: its skill directory, its agent
+directories, how it names an agent and what an agent must declare. There is
+no adapter trait, since a client's behaviour holds no I/O of its own to
+isolate, and no client defined in `pollen.yaml`, which would bypass the
+per-client checks. A client the table does not
 list is served through the directory it reads, `.agents/skills/` for most,
 or through `targets` on an entry.
 See [ADR 0004](docs/adr/0004-deploy-agent-definitions-verbatim-per-client.md).
@@ -238,6 +274,28 @@ symlink only works where the client resolves one and the two targets need not
 share an ancestor. Detecting which agents are installed and targeting those
 would avoid the duplication, but a deployment that changes shape with the
 contents of a home directory cannot be reasoned about or reproduced in CI.
+
+**Agents verbatim, per client.** No specification covers agent definitions,
+and the clients disagree on what makes one worth writing: Claude Code
+allowlists `tools`, OpenCode sets `permission` rules, and they name models
+differently. Translating to a common format would keep only the frontmatter
+both understand and drop the tools and model, deploying something other than
+what the author wrote, so pollen copies the file as is into the agent
+directory of each client its item names, and checks it against each of those
+clients. An author targeting two clients maintains two files, each item
+naming its client. pollen deploys an agent because it is a single file of
+prompt text, holding no state, read from a directory the client knows; a
+client keeping its agents inside a shared config file is not served, since
+pollen owns whole entries of a directory, never parts of a file. `--target`
+deploys no agent, so a one-off run into a scratch directory never rewrites
+the user's agent directories. See
+[ADR 0004](docs/adr/0004-deploy-agent-definitions-verbatim-per-client.md).
+
+**One kind per directory.** A state file records skills or agents, and a run
+refuses to deploy the other kind into the directory, or both kinds into one:
+a skill directory and an agent file are installed and removed differently,
+and a slip such as `--target .claude/agents` would otherwise write skill
+directories among agents.
 
 **A state file, rather than inferring ownership.** Without a record of what it
 installed, a tool either refuses to remove anything (leaving orphans forever)
@@ -309,12 +367,12 @@ would lie after a fresh clone; the hash also catches an installed copy someone
 edited by hand, which is a real thing people do and then forget.
 
 **Validation before deployment.** A skill whose frontmatter breaks the
-specification stops the whole run rather than being installed and ignored by
-the agent later. A skill that is silently not loaded is a worse outcome than
+specification, or an agent breaking the rules of a client it goes to, stops
+the whole run rather than being installed and ignored by the agent later. A skill that is silently not loaded is a worse outcome than
 an error naming the file.
 
-**Invisible characters refuse a skill.** An agent reads every code point of
-a skill; a reviewer reading it on a forge or in an editor sees none of the
+**Invisible characters refuse a skill or an agent.** An agent reads every
+code point of a skill and of an agent file; a reviewer reading it on a forge or in an editor sees none of the
 zero-width and bidirectional controls, tag characters or stray variation
 selectors, so they carry instructions nobody approved. Every UTF-8 file of
 the skill is checked, not only `SKILL.md`, since an agent reads its
@@ -358,26 +416,35 @@ digest. A second file would only repeat the config, and could disagree with it.
 - A skill's frontmatter `name` equals its directory name, and that name is
   what it deploys under. The specification requires the first; `pollen`
   enforces it rather than renaming around it.
-- `pollen` only ever replaces or removes a directory recorded in the state
-  file. `--force` is the single, explicit way to take over one that is not.
+- An agent deployed for a client follows that client's rules; for Claude
+  Code, its frontmatter `name` equals its file name, which is what it deploys
+  under, so two files cannot claim one agent. An agent sent to `targets`
+  follows the rules every client shares.
+- `pollen` only ever replaces or removes a directory or an agent file
+  recorded in the state file. `--force` is the single, explicit way to take
+  over one that is not.
+- A directory holds skills or agents, as its state file records, never both.
 - A target directory has one owning config. An update prunes whatever its
   config does not declare, so a second config would delete the first one's
   skills; `update` refuses a target whose recorded config still exists, and
   `--force` hands the directory over. A recorded config that is gone (the
   project moved) is not an owner any more and is replaced silently.
 - A run modifies a directory none of its entries names only when it is a
-  known client skill directory whose state file names that config, and never
-  in a run with `--target` or `--client`.
+  known client skill or agent directory whose state file names that config,
+  and never in a run with `--target` or `--client`. A run with `--target`
+  visits no agent directory.
 - A repo's `path` never resolves outside its source root, before or after
   symlink resolution. Each selected skill directory has the same containment
   check, including child directory symlinks. Excluded candidates are not selected.
-- Managed state keys follow the same name rules as authored skills. Unsafe
+- Managed state keys, skills and agents alike, follow the same name rules as
+  authored skills, so a key never holds a path separator. Unsafe
   keys refuse the target before installing, pruning or sweeping staging material.
-- A deployed skill's UTF-8 files hold no invisible character beyond the
-  joiners, presentation selectors and opening byte order mark text needs.
+- A deployed skill's UTF-8 files, and a deployed agent file, hold no
+  invisible character beyond the joiners, presentation selectors and opening
+  byte order mark text needs.
   `--allow-hidden-characters` is the single, explicit way past it.
 - An install becomes visible in one rename. There is no window in which the
-  target holds a partially written skill.
+  target holds a partially written skill or agent.
 - A `well-known` artifact is used only once its SHA-256 matches the index,
   and a pinned skill only when the index publishes its pinned digest.
 - An archive unpacks inside its skill directory or not at all: an absolute
@@ -402,10 +469,22 @@ digest. A second file would only repeat the config, and could disagree with it.
 - Deploying to several targets duplicates every skill on disk. Skills are
   small, but a client that scans both `.claude/skills/` and `.agents/skills/`
   sees each skill twice and shadows one, logging a warning.
-- Two sources providing the same skill name is an error with no resolution
-  mechanism — no priority order, no namespacing. Rename one, or exclude it.
-- Skills are copied, not symlinked, so editing a deployed skill does not edit
-  its source, and the next `update` overwrites the edit.
+- Two sources providing the same skill name, or the same agent name for one
+  directory, is an error with no resolution mechanism — no priority order, no
+  namespacing. Rename one, or exclude it.
+- An agents item naming no `clients` takes the top-level `clients`, every
+  client by default, so a file written for one client fails the run until its
+  item names that client.
+- Agents nested in a subdirectory of an agents `path` are not deployed:
+  OpenCode would name one after its path, and a state key never holds a `/`.
+- An agent file is checked for the fields each client requires and its
+  identity rule, not for values such as a model or a tool name, which would
+  mean guessing a provider's catalogue.
+- A client that does not read agents from a directory of its own, or keeps
+  them inside a shared config file, cannot receive agents, and a client the
+  table does not list receives them only through `targets`.
+- Skills and agents are copied, not symlinked, so editing a deployed copy does
+  not edit its source, and the next `update` overwrites the edit.
 - A source is fetched over the network on every `update` unless `--offline`
   is passed; for a `well-known` source that means its index, while an
   artifact already in the cache is not downloaded again.

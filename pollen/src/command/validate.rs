@@ -4,7 +4,7 @@ use anyhow::{Context as _, Result, bail};
 
 use crate::cli::Options;
 use crate::command::Context;
-use crate::command::plan::{self, Planned};
+use crate::command::plan::{self, Planned, Problem};
 
 /// What checking one config file found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,8 +14,10 @@ pub struct Validation {
     pub sources: usize,
     /// The skills its sources yield, `None` when only the file was checked.
     pub skills: Option<Vec<Planned>>,
-    /// The selected skills that are invalid, one message each.
-    pub problems: Vec<String>,
+    /// The agents its sources yield, `None` when only the file was checked.
+    pub agents: Option<Vec<Planned>>,
+    /// The selected skills and agents that are invalid, one message each.
+    pub problems: Vec<Problem>,
 }
 
 /// With several files, every one is checked before the run fails, so a single
@@ -25,7 +27,7 @@ pub struct Validation {
 /// # Errors
 ///
 /// When a config file is invalid, a source cannot be fetched, or a selected
-/// skill is invalid.
+/// skill or agent is invalid.
 pub async fn run(
     options: &Options,
     configs: &[PathBuf],
@@ -59,11 +61,11 @@ pub async fn run(
     }
 }
 
-/// Check the config file at `path`, and unless `config_only` every skill its
-/// sources select and the plan of each directory they go to.
+/// Check the config file at `path`, and unless `config_only` every skill and
+/// agent its sources select and the plan of each directory they go to.
 ///
-/// An invalid skill lands in `problems` rather than
-/// failing the check, so every one of them is reported.
+/// An invalid skill or agent lands in `problems` rather than failing the
+/// check, so every one of them is reported.
 ///
 /// # Errors
 ///
@@ -102,6 +104,7 @@ pub async fn check(
             path: path.to_owned(),
             sources,
             skills: None,
+            agents: None,
             problems: Vec::new(),
         });
     }
@@ -118,6 +121,7 @@ pub async fn check(
         path: path.to_owned(),
         sources,
         skills: Some(plan.skills),
+        agents: Some(plan.agents),
         problems: plan.problems,
     })
 }
@@ -133,14 +137,20 @@ fn report(validation: &Validation) -> Result<()> {
     for skill in skills {
         println!("  {}  {}", skill.name, skill.origin());
     }
+    for agent in validation.agents.iter().flatten() {
+        println!("  {} (agent)  {}", agent.name, agent.origin());
+    }
     for problem in &validation.problems {
-        tracing::error!("{problem}");
+        tracing::error!("{}", problem.message);
     }
 
     if validation.problems.is_empty() {
-        tracing::debug!(count = skills.len(), "every selected skill is valid");
+        tracing::debug!(
+            count = skills.len(),
+            "every selected skill and agent is valid"
+        );
         Ok(())
     } else {
-        bail!("{path}: {} skill(s) are invalid", validation.problems.len())
+        bail!("{path}: {}", plan::describe(&validation.problems))
     }
 }

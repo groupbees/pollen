@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use walkdir::WalkDir;
 
-use crate::config::PathSpec;
+use crate::agent;
+use crate::config::{AgentSelection, PathSpec};
 use crate::skill::SKILL_FILE;
 use crate::source::{contained_join, relative_slug};
 
@@ -48,6 +49,54 @@ pub fn discover(root: &Path, spec: &PathSpec) -> Result<Vec<PathBuf>> {
             .with_context(|| format!("{} leaves the source root", candidate.display()))?;
         contained_join(&canonical_root, relative_to_root)?;
         kept.push(candidate);
+    }
+    kept.sort();
+    Ok(kept)
+}
+
+/// List the agent files an `agents:` item selects, in a stable order: the
+/// files directly under its path whose name ends with `.md`, less those
+/// whose agent name `exclude` matches.
+///
+/// # Errors
+///
+/// When the entry's path is missing, is not a directory, escapes the source
+/// root, or cannot be read, or a selected file leaves the source root.
+pub fn agent_files(root: &Path, spec: &AgentSelection) -> Result<Vec<PathBuf>> {
+    let canonical_root = root.canonicalize()?;
+    let base = contained_join(&canonical_root, &spec.path).with_context(|| {
+        format!(
+            "`{}` does not exist in the source rooted at {}",
+            spec.path.display(),
+            root.display()
+        )
+    })?;
+    anyhow::ensure!(base.is_dir(), "{} is not a directory", base.display());
+
+    let exclude = spec.exclude_regex()?;
+    let mut kept = Vec::new();
+    for entry in
+        std::fs::read_dir(&base).with_context(|| format!("cannot read {}", base.display()))?
+    {
+        let path = entry
+            .with_context(|| format!("cannot read {}", base.display()))?
+            .path();
+        let Some(name) = agent::name_of(&path) else {
+            continue;
+        };
+        if !path.is_file() {
+            continue;
+        }
+        if exclude
+            .as_ref()
+            .is_some_and(|pattern| pattern.is_match(name))
+        {
+            tracing::debug!(path = %path.display(), "excluded");
+            continue;
+        }
+        let relative = relative_slug(&base, &path);
+        contained_join(&base, Path::new(&relative))?;
+        kept.push(path);
     }
     kept.sort();
     Ok(kept)
@@ -118,6 +167,54 @@ mod tests {
             format!("---\nname: {name}\ndescription: x\n---\n"),
         )
         .unwrap();
+    }
+
+    fn agent_spec(path: &str, exclude: Option<&str>) -> AgentSelection {
+        AgentSelection {
+            path: PathBuf::from(path),
+            exclude: exclude.map(ToOwned::to_owned),
+            destination: crate::config::Destination::Default,
+        }
+    }
+
+    #[test]
+    fn lists_the_agent_files_directly_under_the_path() {
+        let root = tempfile::tempdir().unwrap();
+        let agents = root.path().join("agents");
+        std::fs::create_dir_all(agents.join("team")).unwrap();
+        for file in ["reviewer.md", "README.md", "notes.txt", "team/nested.md"] {
+            std::fs::write(agents.join(file), "x").unwrap();
+        }
+        std::fs::create_dir(agents.join("folder.md")).unwrap();
+
+        let all = agent_files(root.path(), &agent_spec("agents", None)).unwrap();
+        let kept = agent_files(root.path(), &agent_spec("agents", Some("^README$"))).unwrap();
+
+        assert_eq!(names(&all), ["README.md", "reviewer.md"]);
+        assert_eq!(names(&kept), ["reviewer.md"]);
+    }
+
+    #[test]
+    fn refuses_a_missing_agent_path() {
+        let root = tempfile::tempdir().unwrap();
+
+        assert!(agent_files(root.path(), &agent_spec("absent", None)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_an_agent_file_linking_out_of_the_source() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.md"), "x").unwrap();
+        std::fs::create_dir(root.path().join("agents")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.md"),
+            root.path().join("agents/secret.md"),
+        )
+        .unwrap();
+
+        assert!(agent_files(root.path(), &agent_spec("agents", None)).is_err());
     }
 
     fn names(paths: &[PathBuf]) -> Vec<String> {

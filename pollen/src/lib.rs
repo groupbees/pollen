@@ -1,6 +1,8 @@
 //! Deploy Agent Skills from git repositories, local directories and
-//! well-known discovery indexes, declaratively, from a single `pollen.yaml`.
+//! well-known discovery indexes, and agent definitions from git repositories
+//! and local directories, declaratively, from a single `pollen.yaml`.
 
+pub mod agent;
 pub mod cli;
 pub mod command;
 pub mod config;

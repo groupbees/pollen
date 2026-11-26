@@ -15,6 +15,7 @@ from pollen._types import (
 
 StrPath: TypeAlias = str | PathLike[str]
 Client: TypeAlias = Literal["claude-code", "opencode", "all"]
+AgentClient: TypeAlias = Literal["claude-code", "opencode"]
 
 class PollenError(Exception):
     """A pollen command failed."""
@@ -32,7 +33,7 @@ def update(
     force: bool = False,
     allow_hidden_characters: bool = False,
 ) -> Report:
-    """Install, refresh and prune the skills the config declares."""
+    """Install, refresh and prune the skills and agents the config declares."""
 
 def list_installed(
     *,
@@ -43,7 +44,7 @@ def list_installed(
     cache_dir: StrPath | None = None,
     offline: bool = False,
 ) -> list[Deployed]:
-    """The skills pollen manages in each directory an update visits."""
+    """The skills and agents pollen manages in each directory an update visits."""
 
 def validate(
     *,
@@ -58,7 +59,7 @@ def validate(
     pinned: bool = False,
     allow_hidden_characters: bool = False,
 ) -> Validation:
-    """Check the config and, unless `config_only`, every skill it selects."""
+    """Check the config and, unless `config_only`, every skill and agent it selects."""
 
 def outdated(
     *,
@@ -99,10 +100,11 @@ def show(
     *,
     revision: str | None = None,
     path: StrPath | None = None,
+    agents: list[tuple[StrPath, AgentClient]] | None = None,
     cache_dir: StrPath | None = None,
     offline: bool = False,
 ) -> Listing:
-    """List the skills a git source provides."""
+    """List the skills a git source provides, and the agents of each `(path, client)`."""
 
 def schema() -> str:
     """The JSON Schema for `pollen.yaml`, as a JSON document."""
