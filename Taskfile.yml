@@ -42,6 +42,16 @@ tasks:
     cmds:
       - cargo test --all-targets --locked {{.CLI_ARGS}}
 
+  coverage:
+    desc: Run the Rust tests and measure their line and region coverage
+    cmds:
+      - cargo llvm-cov --all-targets --locked {{.CLI_ARGS}}
+
+  coverage:report:
+    desc: Print the report of the last coverage run, in another format if asked
+    cmds:
+      - cargo llvm-cov report {{.CLI_ARGS}}
+
   test:python:
     desc: Build the Python bindings and run their tests
     dir: pollen-py

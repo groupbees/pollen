@@ -14,8 +14,8 @@ describes, never in a public issue or pull request.
 
 [mise](https://mise.jdx.dev) installs every tool at the version
 [mise.toml](mise.toml) pins: the Rust toolchain with `rustfmt` and `clippy`,
-Python, uv, Node.js for the documentation site, Task, pre-commit, Trivy, and
-`cargo-edit` for cutting a release. [mise.lock](mise.lock) holds their
+Python, uv, Node.js for the documentation site, Task, pre-commit, Trivy,
+`cargo-llvm-cov` for the coverage, and `cargo-edit` for cutting a release. [mise.lock](mise.lock) holds their
 checksums.
 
 Install mise and hook it into your shell, as its
@@ -147,6 +147,22 @@ needs [Homebrew](https://brew.sh) on `PATH`, so the task runs on macOS only:
 task test:homebrew
 ```
 
+[cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) measures the line
+and region coverage of the Rust tests in `pollen`. It leaves out branch
+coverage, which needs a nightly toolchain, and the bindings' Rust code, which
+only the Python tests run. No threshold is enforced:
+
+```sh
+task coverage
+```
+
+After that run, print the same figures as an HTML report in
+`target/llvm-cov/html/`, without running the tests again:
+
+```sh
+task coverage:report -- --html
+```
+
 New behaviour comes with tests, and a fix comes with the regression test that
 would have caught it.
 
@@ -202,6 +218,7 @@ commit gate stays fast.
 | Workflow | Purpose | Reproduce locally |
 | --- | --- | --- |
 | [quality.yaml](.github/workflows/quality.yaml) | The merge gate: hooks, tests on Linux and Windows, the LiteLLM and Homebrew checks, release builds | `task lint`, `task test`, `task test:litellm`, `task test:homebrew` |
+| [coverage.yaml](.github/workflows/coverage.yaml) | The Rust tests' coverage on Linux: a table in the run's summary, the HTML report as an artifact | `task coverage` |
 | [binaries.yaml](.github/workflows/binaries.yaml) | The release archive of every target, for `quality` and `release` | `task build -- --target <target>`; for musl, on Linux of the same architecture with `musl-tools`, prefixed with `CC_x86_64_unknown_linux_musl=musl-gcc` (or `CC_aarch64_unknown_linux_musl`) |
 | [docs.yaml](.github/workflows/docs.yaml) | Every version of the documentation site, links validated, deployed to GitHub Pages from `main` | `git fetch --tags` then `task docs:build` |
 | [security.yaml](.github/workflows/security.yaml) | Trivy scan of the repository | `trivy fs .` |
@@ -209,7 +226,9 @@ commit gate stays fast.
 | [renovate.yaml](.github/workflows/renovate.yaml) | Dependency and security update pull requests, from Dependabot alerts and [OSV](https://osv.dev), per [renovate.json](renovate.json) | none: run it manually with `dryRun` to see what it would open |
 | [release.yaml](.github/workflows/release.yaml) | Publishes a `v*` tag: archives, SBOM, attestations and their Sigstore bundle, the Homebrew formula, the PyPI wheels | none: it publishes |
 
-`quality` and `security` are the checks that block a merge; `docs` is
+`quality` and `security` are the checks that block a merge. `coverage` is
+informational, in a workflow of its own because every job of those two is
+required. `docs` is
 path-filtered on `docs/` outside `docs/adr/`, `assets/`, the mise and Task
 files and its own workflow, so it is never a required check. For the Windows
 code paths without a Windows host, `task lint:windows` runs clippy on them.
