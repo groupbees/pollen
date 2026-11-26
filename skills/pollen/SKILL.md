@@ -145,7 +145,7 @@ pollen config migrate [--dry-run]   # rewrite pollen.yaml in the newest format v
 | `` … under `discovery`, each as `- url: <origin>` `` | A `version: 2` file lists origins under `discovery`, not as `well-known` in `repos`: move the entry, or `pollen config migrate` a version 1 file |
 | `` … or under `skills` with `version: 2` `` | A version 1 file uses `paths`; rename the key, or `pollen config migrate` |
 | `… this pollen reads versions 1 to N; upgrade pollen` | The file is newer than the installed pollen: upgrade it (see above) |
-| `two sources provide …` | Rename one skill or agent, or `exclude` it in one source; with `--client`, every agents item goes to that client, so two items holding one name collide |
+| `two sources provide …` | Rename one skill or agent, or `exclude` it in one source |
 | `` … for claude-code, the frontmatter … `` | An agent sent to a client whose rules it breaks: fix the file, give its item the `clients` it is written for, or `exclude` it (`^README$`) |
 | `` … holds agents pollen deployed, so pollen does not deploy skills into it `` | A skill destination points at an agent directory (or the reverse): pick another directory |
 | `` … is pinned to sha256:…, but the index publishes … `` | The publisher replaced the skill: `pollen outdated`, then `pollen autoupdate` |

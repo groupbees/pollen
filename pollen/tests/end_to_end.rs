@@ -1136,7 +1136,7 @@ mod agents {
     }
 
     #[test]
-    fn a_run_with_a_target_deploys_skills_only_and_a_client_run_sends_every_item_to_its_client() {
+    fn a_run_with_a_target_deploys_skills_only_and_a_client_run_keeps_what_the_config_sends_it() {
         let origin = catalog();
         let workspace = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
@@ -1157,29 +1157,16 @@ mod agents {
         assert!(!ws.join(".claude").exists(), "{output}");
         assert!(!ws.join(".opencode").exists(), "{output}");
 
-        let error = fails(&pollen(
-            ws,
-            cache.path(),
-            &["update", "--offline", "--client", "opencode"],
-            &[],
-        ));
-        assert!(
-            error.contains("two sources provide the agent `reviewer` in .opencode/agents"),
-            "{error}"
-        );
-
-        std::fs::write(
-            ws.join("pollen.yaml"),
-            config(origin.path(), "all", &["opencode"]),
-        )
-        .unwrap();
         succeeds(&pollen(
             ws,
             cache.path(),
             &["update", "--offline", "--client", "opencode"],
             &[],
         ));
-        assert!(ws.join(".opencode/agents/reviewer.md").is_file());
+        assert_eq!(
+            std::fs::read(ws.join(".opencode/agents/reviewer.md")).unwrap(),
+            std::fs::read(origin.path().join("agents/opencode/reviewer.md")).unwrap()
+        );
         assert!(ws.join(".agents/skills/reviewer").is_dir());
         assert!(!ws.join(".claude").exists());
     }

@@ -271,17 +271,7 @@ impl Config {
                 scope.client_dirs(self.clients.as_deref().unwrap_or(&Client::ALL))
             }
             (Destination::Clients(only), destination) => {
-                let own: &[Client] = match destination {
-                    Destination::Default => self.clients.as_deref().unwrap_or(&Client::ALL),
-                    Destination::Clients(clients) => clients,
-                    Destination::Targets(_) => &[],
-                };
-                let kept: Vec<Client> = own
-                    .iter()
-                    .copied()
-                    .filter(|client| only.contains(client))
-                    .collect();
-                scope.client_dirs(&kept)
+                scope.client_dirs(&self.kept_clients(destination, only))
             }
             (Destination::Default, Destination::Clients(clients)) => scope.client_dirs(clients),
             (Destination::Targets(targets), _)
@@ -313,8 +303,10 @@ impl Config {
             (Destination::Default, Destination::Default) => {
                 of_clients(self.clients.as_deref().unwrap_or(&Client::ALL))
             }
-            (Destination::Clients(clients), _)
-            | (Destination::Default, Destination::Clients(clients)) => of_clients(clients),
+            (Destination::Clients(only), destination) => {
+                of_clients(&self.kept_clients(destination, only))
+            }
+            (Destination::Default, Destination::Clients(clients)) => of_clients(clients),
             (Destination::Default, Destination::Targets(targets)) => targets
                 .iter()
                 .map(|target| AgentDir {
@@ -327,6 +319,20 @@ impl Config {
         chosen
             .into_iter()
             .filter(|agents| seen.insert(directory_key(&agents.dir)))
+            .collect()
+    }
+
+    /// The clients `destination` deploys for that are among `only`: none for
+    /// an entry sent to `targets`.
+    fn kept_clients(&self, destination: &Destination, only: &[Client]) -> Vec<Client> {
+        let own: &[Client] = match destination {
+            Destination::Default => self.clients.as_deref().unwrap_or(&Client::ALL),
+            Destination::Clients(clients) => clients,
+            Destination::Targets(_) => &[],
+        };
+        own.iter()
+            .copied()
+            .filter(|client| only.contains(client))
             .collect()
     }
 
@@ -1874,18 +1880,34 @@ mod tests {
     }
 
     #[test]
-    fn a_cli_target_sends_no_agent_anywhere_and_a_cli_client_to_its_agent_directory() {
+    fn a_cli_target_sends_no_agent_anywhere_and_a_cli_client_keeps_what_is_sent_to_it() {
         let config = parse(AGENTS).unwrap();
-        let shared = &config.repos[0].agents()[2].destination;
+        let [default, claude, shared] = config.repos[0].agents() else {
+            panic!("three agents items");
+        };
 
         let target = Scope::new(&[PathBuf::from("out")], &[], false);
         let client = Scope::new(&[], &[Client::OpenCode], false);
 
-        assert!(config.agent_directories(shared, &target).is_empty());
+        assert!(
+            config
+                .agent_directories(&shared.destination, &target)
+                .is_empty()
+        );
         assert!(config.all_agent_directories(&target).is_empty());
         assert_eq!(
-            agent_dirs(&config.agent_directories(shared, &client)),
+            agent_dirs(&config.agent_directories(&default.destination, &client)),
             [(".opencode/agents".to_owned(), Some(Client::OpenCode))]
+        );
+        assert!(
+            config
+                .agent_directories(&claude.destination, &client)
+                .is_empty()
+        );
+        assert!(
+            config
+                .agent_directories(&shared.destination, &client)
+                .is_empty()
         );
     }
 

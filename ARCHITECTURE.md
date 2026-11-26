@@ -471,9 +471,7 @@ digest. A second file would only repeat the config, and could disagree with it.
   sees each skill twice and shadows one, logging a warning.
 - Two sources providing the same skill name, or the same agent name for one
   directory, is an error with no resolution mechanism — no priority order, no
-  namespacing. Rename one, or exclude it. `--client` sends every agents item
-  to that client, so two items written for different clients that share an
-  agent name collide in such a run.
+  namespacing. Rename one, or exclude it.
 - An agents item naming no `clients` takes the top-level `clients`, every
   client by default, so a file written for one client fails the run until its
   item names that client.
