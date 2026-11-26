@@ -1021,7 +1021,13 @@ mod agents {
             .current_dir(workspace)
             .arg("--cache-dir")
             .arg(cache)
-            .args(args);
+            .args(args)
+            // GitHub's Windows runners set `core.autocrlf=true`, so the
+            // checkout pollen copies would hold CRLF and never equal the LF
+            // bytes these tests wrote.
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "core.autocrlf")
+            .env("GIT_CONFIG_VALUE_0", "false");
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("POLLEN_") {
                 command.env_remove(name);
