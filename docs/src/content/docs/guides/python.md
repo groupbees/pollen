@@ -54,7 +54,7 @@ for summary in report.summaries:
         print(summary.target, change.action, change.name, change.origin)
 ```
 
-`update` returns a `Report` with one `Summary` per target directory. Each
+`update` returns a `Report` with one `Summary` per directory it visited. Each
 change has an `action`, a `pollen.Action` that compares equal to its value
 (`"added"`, `"updated"`, `"unchanged"`, `"removed"`). `report.count(action)`
 totals one action across every target:
@@ -74,8 +74,8 @@ work like the CLI's global flags:
 | --- | --- | --- |
 | `config` | `--config` | `pollen.yaml`, from the working directory |
 | `global_` | `--global` | `False`; cannot be combined with `config` |
-| `targets` | `--target` | the config's `targets`, else its `clients`' directories |
-| `clients` | `--client` | the config's `targets`, else its `clients`; `"claude-code"`, `"opencode"` or `"all"`, and not with `targets` |
+| `targets` | `--target` | each entry's `clients` or `targets`, else the top-level `clients` |
+| `clients` | `--client` | each entry's `clients` or `targets`, else the top-level `clients`; `"claude-code"`, `"opencode"` or `"all"`, and not with `targets` |
 | `cache_dir` | `--cache-dir` | the user cache directory |
 | `offline` | `--offline` | `False` |
 | `credentials_file` | `--credentials-file` | the user-level credentials file, which may be absent; taken by `update`, `validate`, `outdated` and `autoupdate` |
@@ -89,7 +89,7 @@ the arguments instead.
 | Function | CLI equivalent | Returns |
 | --- | --- | --- |
 | `update(dry_run=False, force=False, allow_hidden_characters=False)` | `pollen update` | `Report` |
-| `list_installed()` | `pollen list` | `list[Deployed]`, one per target |
+| `list_installed()` | `pollen list` | `list[Deployed]`, one per directory an update visits |
 | `validate(config_only=False, pinned=False, allow_hidden_characters=False)` | `pollen validate` | `Validation` |
 | `outdated(min_release_age=None)` | `pollen outdated` | `list[SourceStatus \| DigestStatus]` |
 | `autoupdate(freeze=False, dry_run=False, min_release_age=None)` | `pollen autoupdate` | `AutoupdateOutcome` |
