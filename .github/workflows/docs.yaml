@@ -6,11 +6,13 @@ on:
       - main
     paths:
       - docs/**
+      - "!docs/adr/**"
       - assets/**
       - .github/workflows/docs.yaml
   pull_request:
     paths:
       - docs/**
+      - "!docs/adr/**"
       - assets/**
       - .github/workflows/docs.yaml
   workflow_dispatch:
