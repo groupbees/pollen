@@ -3,28 +3,22 @@ title: pollen
 description: Deploy Agent Skills from git repositories, local directories and well-known indexes, declaratively, from a single pollen.yaml.
 ---
 
-`pollen` is a small CLI that reads a `pollen.yaml` describing where your
-skills come from — git repositories pinned to a revision, directories next
-to the config file, or origins publishing a well-known discovery index such as
-a LiteLLM gateway — and makes your skills directories match it: it installs
-what is declared, refreshes what moved, and removes what you dropped. The file
-is shaped after `pre-commit`'s: a list of repos, each with a revision and the
-paths to pull from.
+`pollen` makes your skills directories match a `pollen.yaml`: it installs the
+[Agent Skills](https://agentskills.io) the file declares, refreshes what moved
+and removes what you dropped, for Claude Code and every other Agent Skills
+client.
 
-Out of the box it deploys to **both** `.claude/skills/`, which Claude Code
-reads, and `.agents/skills/`, the cross-client convention every other Agent
-Skills client scans — so one `pollen update` serves Claude Code, Cursor,
-Codex, Antigravity CLI, Copilot, OpenCode and the rest without configuring
-anything. A skill folder that also carries a `.claude-plugin/plugin.json` is
-copied whole, so plugin-shaped skills keep working too.
+- [Installation](/guides/installation/): Homebrew, release archives, the
+  Python package.
+- [Configuration file](/reference/configuration/): the sources to deploy from
+  and where the skills go.
+- [Usage](/guides/usage/): `pollen update` and the commands that preview,
+  validate, pin and upgrade.
+- [Well-known sources](/guides/well-known-sources/): skills served by a
+  discovery index, such as a LiteLLM gateway.
+- [Pre-commit hook](/guides/pre-commit-hook/): validate a `pollen.yaml` on
+  every commit.
+- [Python](/guides/python/): the same engine, as a Python API.
 
-What it is not: a registry, a package manager with dependency resolution, or a
-skill authoring tool. It moves directories that already exist, validates
-them against the specification and refuses any that hides invisible
-characters.
-
-Start with the [installation](/guides/installation/), describe your sources
-in a [configuration file](/reference/configuration/), then
-[run `pollen update`](/guides/usage/). The design and the reasoning behind it
-are in
+The design and the reasoning behind it are in
 [ARCHITECTURE.md](https://github.com/groupbees/pollen/blob/main/ARCHITECTURE.md).

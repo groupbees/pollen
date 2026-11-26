@@ -5,6 +5,12 @@ Issues and pull requests go to
 toolchain, run `pre-commit install`, keep `cargo test` and the Python tests
 green.
 
+Report a bug in a [GitHub issue](https://github.com/groupbees/pollen/issues),
+with the version (`pollen --version`), the operating system, the
+`pollen.yaml` and the command that reproduce it, and what you expected
+instead. Report a vulnerability privately, as [SECURITY.md](SECURITY.md)
+describes, never in a public issue or pull request.
+
 ## Development setup
 
 The toolchain version is pinned in
@@ -168,9 +174,7 @@ would have caught it.
 ## Pre-commit hooks
 
 `pre-commit install` puts the gate in place, for both the `pre-commit` and
-the `commit-msg` stages; the hooks must pass before a push. In a clone where
-pre-commit was installed before the `commit-msg` hook existed, run it once
-more.
+the `commit-msg` stages; the hooks must pass before a push.
 
 The whole repo:
 
@@ -184,24 +188,21 @@ One hook, while iterating:
 pre-commit run cargo-clippy --all-files
 ```
 
+The hooks are listed in
+[.pre-commit-config.yaml](.pre-commit-config.yaml), and the code style is the
+one they enforce. Most fix the file themselves, or name what to fix; these need
+more:
+
 | Hook | What it checks | How to fix |
 | --- | --- | --- |
-| `trailing-whitespace`, `end-of-file-fixer` | Whitespace hygiene | Re-run; the hook rewrites the files |
-| `check-yaml`, `check-added-large-files`, `check-merge-conflict`, `detect-private-key` | Basic file sanity | Fix the file it names |
 | `yamllint` | YAML style, per [.yamllint.yaml](.yamllint.yaml) — block style only, no leading `---` | Rewrite the YAML |
-| `actionlint` | Workflow syntax and expressions | Fix the workflow |
 | `renovate-config-validator` | [renovate.json](renovate.json) is valid and uses no option Renovate has renamed | `npx --package renovate -- renovate-config-validator --migrate renovate.json` for a renamed option; otherwise fix the key it names |
-| `cargo-fmt` | Formatting | `cargo fmt` |
 | `cargo-clippy` | `clippy` with `pedantic` on both crates, warnings denied | Fix the finding, or add a scoped `#[allow]` with a justification |
-| `ruff-check`, `ruff-format` | Lint and formatting of the Python bindings, per [pollen-py/pyproject.toml](pollen-py/pyproject.toml) | Re-run; most findings fix themselves |
-| `uv-lock` | [pollen-py/uv.lock](pollen-py/uv.lock) matches `pyproject.toml` | Re-run; the hook rewrites the lockfile |
 | `pyright` | Types of the Python package, its stubs and its tests | Fix the type, or the stub in [pollen-py/python/pollen/_pollen.pyi](pollen-py/python/pollen/_pollen.pyi) |
 | `license-copy` | [pollen-py/LICENSE](pollen-py/LICENSE), which the Python package ships, is identical to [LICENSE](LICENSE) | `cp LICENSE pollen-py/LICENSE` |
 | `pollen-validate` | [examples/pollen.yaml](examples/pollen.yaml) still satisfies the config rules | Fix the example, or the rule that broke it |
 | `pollen-schema` | [schema/pollen.schema.json](schema/pollen.schema.json) matches the config types | Re-run; the hook rewrites the file |
-| `shellcheck` | The scripts in [scripts/](scripts/) | Fix the script |
 | `docs-biome` | Biome lint and format of the site, per [docs/biome.jsonc](docs/biome.jsonc) | `npm --prefix docs run format` |
-| `docs-astro-check` | Types and page frontmatter of the site | Fix the file it names |
 | `no-co-authors` | The commit message carries no `Co-Authored-By:` trailer and no `Generated with` line; runs at `commit-msg`, so `--all-files` and CI skip it | Rewrite the message |
 
 [.pre-commit-hooks.yaml](.pre-commit-hooks.yaml) at the repository root is a
@@ -219,43 +220,34 @@ commit gate stays fast.
 
 ## Continuous integration
 
-| Workflow | Triggers on | What it does | Reproduce locally |
-| --- | --- | --- | --- |
-| [quality.yaml](.github/workflows/quality.yaml) | every push to `main`, every pull request | `pre-commit run --all-files` on Linux, `cargo test --all-targets --locked` on both Linux (`ubuntu-24.04`) and Windows (`windows-2025`), the Python bindings' tests on both with Python 3.11 and 3.14, the documentation site's tests, the LiteLLM check on Linux, the Homebrew formula check on macOS, and `binaries`, the release builds of every target | `pre-commit run --all-files`, `cargo test --all-targets --locked`, `uv run --directory pollen-py pytest`, `npm --prefix docs test`, `tests/litellm.sh` and `tests/homebrew-formula.sh`; for Windows, `cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings` type-checks the Windows code paths from any host |
-| [binaries.yaml](.github/workflows/binaries.yaml) | called by `quality` and `release` | Builds the release binary of every target, each on its native runner except `x86_64-apple-darwin`, cross-built on Apple Silicon: Linux (musl, x86_64 and arm64), macOS (arm64 and x86_64) and Windows (MSVC, x86_64 and arm64). Checks that it runs and packages it, as a `.tar.gz` or, for Windows, a `.zip`; called by `release`, keeps the archives for the release page. The musl targets compile `ring`'s C with Ubuntu's `musl-gcc` (`musl-tools`) | `cargo build --release --locked --target <target>`; for a musl target, on Linux of the same architecture with `musl-tools` installed, prefix it with `CC_x86_64_unknown_linux_musl=musl-gcc` (or `CC_aarch64_unknown_linux_musl`) |
-| [docs.yaml](.github/workflows/docs.yaml) | pushes to `main` and pull requests touching `docs/` outside `docs/adr/`, `assets/` or the workflow; manual | Builds every version of the documentation site, links validated; on `main`, deploys it to GitHub Pages | `git fetch --tags` then `npm --prefix docs run build:versions` |
-| [security.yaml](.github/workflows/security.yaml) | every push to `main`, every pull request, daily, manual | `trivy fs` over the repo, failing on fixable `HIGH`/`CRITICAL`, and a second non-blocking scan uploaded to code scanning | `trivy fs .` |
-| [scorecard.yaml](.github/workflows/scorecard.yaml) | every push to `main`, weekly, any change to the branch protection rules | The OpenSSF Scorecard analysis, published for the README badge and uploaded to code scanning | none: it reads the repository's settings on GitHub |
-| [renovate.yaml](.github/workflows/renovate.yaml) | daily, manual (with a dry run and a log level to pick) | Runs Renovate against this repository with [renovate.json](renovate.json): the Rust crates and toolchain, the Python bindings' packages, the documentation site's npm packages and Node.js version, the GitHub Actions, the pre-commit hooks and the LiteLLM test images. Regular updates open on Mondays, grouped per ecosystem for minor and patch, one PR per major, each release at least three days old, plus a weekly lock file maintenance PR for the transitive dependencies; security updates, from GitHub's Dependabot alerts and from the [OSV](https://osv.dev) database (RustSec included), open on any run. OSV alerts cover direct dependencies only (`uv` projects aside): a fix in a transitive crate or npm package that only OSV reports arrives with the lock file maintenance. Nothing is merged automatically, and the dependency dashboard issue lists what is pending or blocked | none: run it manually with `dryRun` to see what it would open |
-| [release.yaml](.github/workflows/release.yaml) | tag `v*` | Checks the tag against `Cargo.toml`, runs `binaries` to build the archives, describes the binary in a CycloneDX SBOM (`cargo cyclonedx`, every target's dependencies), creates the GitHub release with a `SHA256SUMS` over all the archives and notes starting from the previous stable tag, after attesting the build provenance of the archives, `SHA256SUMS` and the SBOM and attesting the SBOM against each archive, installs and tests the Homebrew formula rendered from that `SHA256SUMS` and pushes it to [groupbees/homebrew-tap](https://github.com/groupbees/homebrew-tap), then runs `docs` on `main` so the site's root serves the new release. Alongside, builds the Python wheels (abi3, Python ≥ 3.11) for the same platforms plus musllinux, checks that each native one imports, builds the sdist, and publishes them to PyPI as `pollen-skills`, each with its PEP 740 attestation. A pre-release tag (`v0.2.0-rc1`) builds the archives and keeps them and the SBOM as workflow artifacts, without a release page or attestations; its wheels still go to PyPI, as a pre-release pip installs only when asked | `uvx maturin build --release --manifest-path pollen-py/Cargo.toml` builds the wheel for the host |
+| Workflow | Purpose | Reproduce locally |
+| --- | --- | --- |
+| [quality.yaml](.github/workflows/quality.yaml) | The merge gate: hooks, tests on Linux and Windows, the LiteLLM and Homebrew checks, release builds | `pre-commit run --all-files`, `cargo test --all-targets --locked`, `uv run --directory pollen-py pytest`, `npm --prefix docs test`, `tests/litellm.sh`, `tests/homebrew-formula.sh` |
+| [binaries.yaml](.github/workflows/binaries.yaml) | The release archive of every target, for `quality` and `release` | `cargo build --release --locked --target <target>`; for musl, on Linux of the same architecture with `musl-tools`, prefixed with `CC_x86_64_unknown_linux_musl=musl-gcc` (or `CC_aarch64_unknown_linux_musl`) |
+| [docs.yaml](.github/workflows/docs.yaml) | Every version of the documentation site, links validated, deployed to GitHub Pages from `main` | `git fetch --tags` then `npm --prefix docs run build:versions` |
+| [security.yaml](.github/workflows/security.yaml) | Trivy scan of the repository | `trivy fs .` |
+| [scorecard.yaml](.github/workflows/scorecard.yaml) | OpenSSF Scorecard analysis, for the README badge | none: it reads the repository's settings on GitHub |
+| [renovate.yaml](.github/workflows/renovate.yaml) | Dependency and security update pull requests, from Dependabot alerts and [OSV](https://osv.dev), per [renovate.json](renovate.json) | none: run it manually with `dryRun` to see what it would open |
+| [release.yaml](.github/workflows/release.yaml) | Publishes a `v*` tag: archives, SBOM and attestations, the Homebrew formula, the PyPI wheels | none: it publishes |
 
 `quality` and `security` are the checks that block a merge; `docs` is
-path-filtered, so it is never a required check. `release` has no local
-equivalent: it publishes, and it runs only from a tag.
+path-filtered on `docs/` outside `docs/adr/`, `assets/` and its own
+workflow, so it is never a required check. For the Windows code paths without a Windows host,
+`cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings`
+type-checks them.
 
-`release`'s `homebrew` job is the only one that reaches outside this
-repository: it pushes to `groupbees/homebrew-tap` with a token minted from a
-GitHub App installed on that repository with `contents: write`, whose client
-ID is the `HOMEBREW_TAP_CLIENT_ID` repository variable and whose private key
-is the `HOMEBREW_TAP_PRIVATE_KEY` secret. `renovate` opens its pull requests with the `RENOVATE_TOKEN` secret, a
-fine-grained token on this repository with contents, pull requests, issues,
-workflows and commit statuses write (the `renovate/stability-days` status) and
-Dependabot alerts read: a pull request opened with `GITHUB_TOKEN` would
-trigger no CI. Everything else uses the workflow's
-own `GITHUB_TOKEN`: `release` holds `contents: write` in the job that creates
-the release, along with `id-token: write` and `attestations: write` to sign
-and store its attestations; `security`
-holds `security-events: write` for the SARIF upload and nothing else, and
-`scorecard` that plus `id-token: write` to publish its score. The
-`docs` deploy job holds `pages: write` and `id-token: write`, and `release`'s
-`docs` job `actions: write` to start it. Pages deploys only from `main`, in
-the `github-pages` environment.
+The pipeline needs these secrets and variables:
 
-`release`'s `pypi` job publishes through PyPI trusted publishing: it holds
-`id-token: write` and runs in the `pypi` environment, and the `pollen-skills`
-project on PyPI trusts this repository's `release.yaml` in that environment.
-No PyPI token is stored anywhere. The same OIDC identity signs the PEP 740
-attestation `pypa/gh-action-pypi-publish` uploads with each distribution.
+- `HOMEBREW_TAP_CLIENT_ID` (variable) and `HOMEBREW_TAP_PRIVATE_KEY`
+  (secret): the GitHub App that lets `release` push the formula to
+  [groupbees/homebrew-tap](https://github.com/groupbees/homebrew-tap), the
+  only repository the pipeline writes to besides this one.
+- `RENOVATE_TOKEN` (secret): the token `renovate` opens its pull requests
+  with, since a pull request opened with `GITHUB_TOKEN` would trigger no CI.
+
+Everything else uses the workflow's own `GITHUB_TOKEN`. PyPI publishing goes
+through trusted publishing, in the `pypi` environment, so no PyPI token is
+stored anywhere.
 
 ## The generated JSON Schema
 
@@ -318,27 +310,10 @@ git fetch --tags
 npm --prefix docs run build:versions
 ```
 
-## Cutting a release
-
-Releases go through [scripts/release.sh](scripts/release.sh) and nowhere else:
-it bumps the workspace version in `Cargo.toml` and `Cargo.lock` together,
-commits, tags, and asks before pushing. The Python package takes its version
-from the same field, converted to PEP 440 (`0.6.0-rc1` becomes `0.6.0rc1`). The `release` workflow re-derives the version from the tag and
-refuses to publish when the two disagree, so a hand-made tag fails loudly
-instead of shipping a mislabelled binary.
-
-```sh
-./scripts/release.sh --dry-run 0.2.0
-```
-
-```sh
-./scripts/release.sh 0.2.0
-```
-
 ## Submitting a change
 
 - Branch off `main`.
-- Commit subjects are imperative and lowercase, optionally prefixed with an
+- Commit subjects are imperative, optionally prefixed with an
   area — read `git log --oneline` and follow what is there.
 - Documentation moves with the code it describes, in the same pull request:
   the [documentation site](docs/src/content/docs/) for user-facing behaviour,
@@ -352,5 +327,25 @@ instead of shipping a mislabelled binary.
   [.github/release.yaml](.github/release.yaml)).
 - CI must be green.
 
-Report a vulnerability privately, as [SECURITY.md](SECURITY.md) describes,
-never in a public issue or pull request.
+## Releasing
+
+Releases go through [scripts/release.sh](scripts/release.sh) and nowhere else:
+it bumps the workspace version in `Cargo.toml` and `Cargo.lock` together,
+commits, tags, and asks before pushing. The Python package takes its version
+from the same field, converted to PEP 440 (`0.6.0-rc1` becomes `0.6.0rc1`).
+The `release` workflow re-derives the version from the tag and refuses to
+publish when the two disagree, so a hand-made tag fails loudly instead of
+shipping a mislabelled binary.
+
+```sh
+./scripts/release.sh --dry-run 0.2.0
+```
+
+```sh
+./scripts/release.sh 0.2.0
+```
+
+The release notes are the GitHub release's, generated from the labels of the
+merged pull requests, sorted into the sections of
+[.github/release.yaml](.github/release.yaml). A security fix's notes cite its
+advisory, as [SECURITY.md](SECURITY.md#what-happens-next) describes.
