@@ -1,5 +1,3 @@
-//! The signal an in-flight run stops on.
-
 /// Complete on `SIGTERM` or `SIGINT`.
 ///
 /// # Panics

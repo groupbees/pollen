@@ -73,6 +73,13 @@ fn options(
     })
 }
 
+/// A `PollenError` carrying the whole error chain.
+// `map_err` hands the error over by value.
+#[allow(clippy::needless_pass_by_value)]
+fn pollen_error(error: anyhow::Error) -> PyErr {
+    PollenError::new_err(format!("{error:#}"))
+}
+
 /// Run `future` to completion with the GIL released, as the CLI would.
 ///
 /// The future is polled on the calling thread, the only one where `CPython` runs
@@ -89,7 +96,7 @@ fn block_on<T: Send>(
     py.detach(|| {
         runtime.block_on(async {
             tokio::select! {
-                result = future => result.map_err(|error| PollenError::new_err(format!("{error:#}"))),
+                result = future => result.map_err(pollen_error),
                 interrupt = interrupted() => Err(interrupt),
             }
         })
@@ -111,6 +118,7 @@ async fn interrupted() -> PyErr {
 /// Install, refresh and prune the skills the config declares.
 #[pyfunction]
 #[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, offline=false, credentials_file=None, dry_run=false, force=false, allow_hidden_characters=false))]
+// One parameter per Python keyword argument, mirroring the CLI's flags.
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn update(
     py: Python<'_>,
@@ -191,7 +199,7 @@ fn list_installed(
     let options = options(config, global_, targets, clients, cache_dir, offline, None)?;
     let deployed = py
         .detach(|| command::list::installed(&options))
-        .map_err(|error| PollenError::new_err(format!("{error:#}")))?;
+        .map_err(pollen_error)?;
 
     deployed
         .iter()
@@ -224,6 +232,7 @@ fn list_installed(
 /// Raises `PollenError` when the config is invalid or a selected skill is.
 #[pyfunction]
 #[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, offline=false, credentials_file=None, config_only=false, pinned=false, allow_hidden_characters=false))]
+// One parameter per Python keyword argument, mirroring the CLI's flags.
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn validate(
     py: Python<'_>,
@@ -297,6 +306,7 @@ fn validate(
 /// `well-known` source against its index.
 #[pyfunction]
 #[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, credentials_file=None, min_release_age=None))]
+// One parameter per Python keyword argument, mirroring the CLI's flags.
 #[allow(clippy::too_many_arguments)]
 fn outdated(
     py: Python<'_>,
@@ -363,6 +373,7 @@ fn pending<'py>(py: Python<'py>, pending: Option<&Pending>) -> PyResult<Option<B
 /// old, rewriting the config file unless `dry_run`.
 #[pyfunction]
 #[pyo3(signature = (*, config=None, global_=false, targets=None, clients=None, cache_dir=None, credentials_file=None, freeze=false, dry_run=false, min_release_age=None))]
+// One parameter per Python keyword argument, mirroring the CLI's flags.
 #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn autoupdate(
     py: Python<'_>,
@@ -436,7 +447,7 @@ fn migrate(
     let options = options(config, global_, None, None, None, false, None)?;
     let migration = py
         .detach(|| command::migrate::apply(&options, dry_run))
-        .map_err(|error| PollenError::new_err(format!("{error:#}")))?;
+        .map_err(pollen_error)?;
     record!(py, "Migration" {
         path: &migration.path,
         from_version: migration.from_version,
@@ -490,7 +501,7 @@ fn show<'py>(
 /// The JSON Schema for `pollen.yaml`, as a JSON document.
 #[pyfunction]
 fn schema() -> PyResult<String> {
-    pollen::schema::rendered().map_err(|error| PollenError::new_err(format!("{error:#}")))
+    pollen::schema::rendered().map_err(pollen_error)
 }
 
 /// Run the `pollen` command line on `sys.argv` and return its exit status:

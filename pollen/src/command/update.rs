@@ -1,5 +1,3 @@
-//! `pollen update`: install, refresh and prune the declared skills.
-
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -14,10 +12,8 @@ use crate::deploy;
 use crate::source::Materializer;
 use crate::state::{InstalledSkill, State};
 
-/// What happened to one skill during an update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
-    /// Newly installed.
     Added,
     /// Reinstalled because its source moved on.
     Updated,
@@ -50,9 +46,7 @@ impl Action {
 /// One line of an update's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
-    /// What happened.
     pub action: Action,
-    /// The skill it happened to.
     pub name: String,
     /// Where the skill comes from, empty for a removal.
     pub origin: String,
@@ -61,7 +55,6 @@ pub struct Change {
 /// The result of an update, as printed to stdout.
 #[derive(Debug)]
 pub struct Summary {
-    /// The directory that was updated.
     pub target: PathBuf,
     /// One entry per skill, ordered by name within each action.
     pub changes: Vec<Change>,
@@ -70,7 +63,6 @@ pub struct Summary {
 }
 
 impl Summary {
-    /// How many skills the update put in `action`.
     #[must_use]
     pub fn count(&self, action: Action) -> usize {
         self.changes
@@ -136,7 +128,6 @@ pub struct Report {
 }
 
 impl Report {
-    /// How many skills across every target the update put in `action`.
     #[must_use]
     pub fn count(&self, action: Action) -> usize {
         self.summaries
@@ -158,8 +149,6 @@ impl fmt::Display for Report {
     }
 }
 
-/// Run the subcommand.
-///
 /// # Errors
 ///
 /// When the config cannot be loaded, or the update itself fails.

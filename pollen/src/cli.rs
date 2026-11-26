@@ -1,12 +1,11 @@
-//! The command line surface.
-
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
 use clap::builder::PossibleValue;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::error::ErrorKind;
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::{Client, ClientChoice};
@@ -17,14 +16,12 @@ use crate::{command, shutdown};
 /// A `:` on Windows would split `C:\skills` into `C` and `\skills`.
 const PATH_LIST_SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
 
-/// The config file read when none is named.
 pub const DEFAULT_CONFIG: &str = "pollen.yaml";
 
 /// Deploy Agent Skills declared in `pollen.yaml`.
 #[derive(Debug, Parser)]
 #[command(name = "pollen", version, about, long_about = None)]
 pub struct Cli {
-    /// The options every subcommand shares.
     #[command(flatten)]
     pub options: Options,
 
@@ -43,7 +40,16 @@ pub struct Cli {
     )]
     pub log_filter: String,
 
-    /// What to do.
+    /// Format of the logs on stderr.
+    #[arg(
+        long,
+        env = "POLLEN_LOG_FORMAT",
+        value_enum,
+        default_value_t = LogFormat::Text,
+        global = true
+    )]
+    pub log_format: LogFormat,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -57,7 +63,7 @@ pub struct Options {
         long,
         short = 'c',
         env = "POLLEN_CONFIG_FILE",
-        default_value = DEFAULT_CONFIG,
+        default_value_os_t = PathBuf::from(DEFAULT_CONFIG),
         global = true
     )]
     pub config: PathBuf,
@@ -194,7 +200,6 @@ impl Options {
     }
 }
 
-/// The subcommands pollen exposes.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Install, refresh and prune the declared skills.
@@ -303,7 +308,6 @@ pub enum Command {
 
     /// Work on `pollen.yaml` itself.
     Config {
-        /// What to do with the file.
         #[command(subcommand)]
         command: ConfigCommand,
     },
@@ -318,15 +322,15 @@ pub enum Command {
         repo: String,
 
         /// The tag, branch or commit to read instead of the newest release.
-        #[arg(long)]
+        #[arg(long, env = "POLLEN_REVISION")]
         revision: Option<String>,
 
         /// Only list the skills under this directory of the source.
-        #[arg(long)]
+        #[arg(long, env = "POLLEN_PATH")]
         path: Option<PathBuf>,
 
         /// Output format.
-        #[arg(long, value_enum, default_value_t = Format::Text)]
+        #[arg(long, env = "POLLEN_FORMAT", value_enum, default_value_t = Format::Text)]
         format: Format,
     },
 }
@@ -351,6 +355,14 @@ fn parse_age(text: &str) -> Result<Duration, String> {
         })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum LogFormat {
+    /// One human-readable line per event.
+    Text,
+    /// One JSON object per line, for a log pipeline.
+    Json,
+}
+
 /// How `show` prints its listing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Format {
@@ -366,28 +378,32 @@ pub enum Format {
 /// The `pollen` binary and the Python package's `pollen` command both start
 /// here. A failure is printed to stderr as `Error: …`, as a `main` returning
 /// it would.
-pub fn main<I, T>(args: I) -> u8
-where
-    I: IntoIterator<Item = T>,
-    T: Into<OsString> + Clone,
-{
+pub fn main(args: impl IntoIterator<Item = impl Into<OsString> + Clone>) -> u8 {
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         // `--help` and `--version` come through here too, with status 0.
+        Err(error) => return usage_error(&error),
+    };
+    // `EnvFilter::new` skips a directive it cannot parse and carries on.
+    let filter = match EnvFilter::try_new(&cli.log_filter) {
+        Ok(filter) => filter,
         Err(error) => {
-            let _ = error.print();
-            return u8::try_from(error.exit_code()).unwrap_or(2);
+            return usage_error(&Cli::command().error(
+                ErrorKind::ValueValidation,
+                format!("invalid log filter `{}`: {error}", cli.log_filter),
+            ));
         }
     };
     // Not `init`: it also bridges `log` into `tracing`, and fails in Python,
     // where pyo3-log already owns `log`. A subscriber left by an earlier call
     // in the same process is kept.
-    let _ = tracing::subscriber::set_global_default(
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::new(&cli.log_filter))
-            .with_writer(std::io::stderr)
-            .finish(),
-    );
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr);
+    let _ = match cli.log_format {
+        LogFormat::Text => tracing::subscriber::set_global_default(subscriber.finish()),
+        LogFormat::Json => tracing::subscriber::set_global_default(subscriber.json().finish()),
+    };
 
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -413,7 +429,6 @@ where
     }
 }
 
-/// The subcommands of `pollen config`.
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
     /// Rewrite `pollen.yaml` in the newest format version.
@@ -426,6 +441,12 @@ pub enum ConfigCommand {
         #[arg(long, env = "POLLEN_DRY_RUN")]
         dry_run: bool,
     },
+}
+
+/// Print what clap has to say and return its exit status.
+fn usage_error(error: &clap::Error) -> u8 {
+    let _ = error.print();
+    u8::try_from(error.exit_code()).unwrap_or(2)
 }
 
 async fn run(cli: &Cli) -> Result<()> {
@@ -494,6 +515,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(log_filter.get_default_values(), ["warn"]);
+    }
+
+    #[test]
+    fn a_log_filter_directive_that_does_not_parse_is_a_usage_error() {
+        let status = main(["pollen", "--log-filter", "pollen=loud", "schema"]);
+
+        assert_eq!(status, 2);
+    }
+
+    #[test]
+    fn logs_are_text_unless_json_is_asked_for() {
+        // Read from the definition, so an exported POLLEN_LOG_FORMAT cannot
+        // change the outcome.
+        let command = <Cli as clap::CommandFactory>::command();
+        let log_format = command
+            .get_arguments()
+            .find(|argument| argument.get_id() == "log_format")
+            .unwrap();
+        let json = Cli::parse_from(["pollen", "list", "--log-format", "json"]);
+
+        assert_eq!(log_format.get_default_values(), ["text"]);
+        assert_eq!(json.log_format, LogFormat::Json);
+        assert!(Cli::try_parse_from(["pollen", "--log-format", "yaml", "list"]).is_err());
     }
 
     #[test]

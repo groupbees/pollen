@@ -23,3 +23,7 @@ Every option is also an environment variable:
 | `POLLEN_FORCE` | no | `false` | Let `update` take over a directory it did not install. |
 | `POLLEN_ALLOW_HIDDEN_CHARACTERS` | no | `false` | Let `update` and `validate` accept a skill whose files hold invisible characters, with a warning for each file. |
 | `POLLEN_LOG_FILTER` | no | `warn` | `tracing` filter directive, e.g. `info` to follow each skill as it is installed, or `pollen=debug`. |
+| `POLLEN_LOG_FORMAT` | no | `text` | Format of the logs on stderr, `text` or `json` (one object per line), as `--log-format` does. |
+| `POLLEN_REVISION` | no | newest release | The tag, branch or commit `show` reads, as `--revision` does. |
+| `POLLEN_PATH` | no | — | Directory of the source `show` is limited to, as `--path` does. |
+| `POLLEN_FORMAT` | no | `text` | What `show` prints, `text` or `json`, as `--format` does. |

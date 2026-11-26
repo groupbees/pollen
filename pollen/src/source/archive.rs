@@ -156,6 +156,7 @@ fn set_mode(path: &Path, mode: u32) -> Result<()> {
 }
 
 #[cfg(not(unix))]
+// Keeps the signature of the Unix version, which can fail.
 #[allow(clippy::unnecessary_wraps)]
 fn set_mode(_path: &Path, _mode: u32) -> Result<()> {
     Ok(())

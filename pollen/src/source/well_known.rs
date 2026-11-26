@@ -35,12 +35,10 @@ pub const ARCHIVE: &str = "archive";
 /// One skill an index lists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
-    /// The skill's name.
     pub name: String,
     /// `skill-md` or `archive`; other values are skipped.
     #[serde(rename = "type")]
     pub kind: String,
-    /// What the skill does.
     #[serde(default)]
     pub description: String,
     /// Where the artifact is, relative to the index URL.
@@ -205,7 +203,6 @@ fn known(kind: &str) -> bool {
 /// Which credentials file to read, and whether it must exist.
 #[derive(Debug, Clone)]
 pub struct CredentialsFile {
-    /// The file.
     pub path: PathBuf,
     /// Whether a missing file is an error: it is when named explicitly.
     pub required: bool,

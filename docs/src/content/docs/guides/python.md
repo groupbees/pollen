@@ -37,6 +37,9 @@ pollen update
 python -m pollen update   # through the interpreter, with no script on PATH
 ```
 
+`--log-filter` and `--log-format` apply to the command only: the functions
+[log through `logging`](#errors-logging-and-interrupts).
+
 To get the command alone, outside any project, install it as a tool:
 `uv tool install pollen-skills` or `pipx install pollen-skills`.
 

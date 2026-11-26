@@ -15,49 +15,30 @@ use crate::source::relative_slug;
 /// The file that makes a directory a skill.
 pub const SKILL_FILE: &str = "SKILL.md";
 
-/// Everything that can make a directory fail to be a usable skill.
 #[derive(Debug, Error)]
 pub enum SkillError {
-    /// The directory carries no `SKILL.md`.
     #[error("{path}: no {SKILL_FILE}")]
-    NotASkill {
-        /// The directory that was inspected.
-        path: PathBuf,
-    },
-    /// The `SKILL.md` does not open with a YAML frontmatter block.
+    NotASkill { path: PathBuf },
     #[error("{path}: {SKILL_FILE} has no YAML frontmatter (it must open with a `---` line)")]
-    NoFrontmatter {
-        /// The offending skill directory.
-        path: PathBuf,
-    },
-    /// The frontmatter block is not parseable YAML.
+    NoFrontmatter { path: PathBuf },
     #[error("{path}: {SKILL_FILE} frontmatter is not valid YAML: {source}")]
     Yaml {
-        /// The offending skill directory.
         path: PathBuf,
-        /// The parser's complaint.
         source: serde_norway::Error,
     },
-    /// The frontmatter parses but breaks the specification.
     #[error("{path}: {SKILL_FILE} frontmatter is invalid: {source}")]
     Invalid {
-        /// The offending skill directory.
         path: PathBuf,
-        /// The failing constraints.
         source: validator::ValidationErrors,
     },
-    /// The `name` field disagrees with the directory it lives in.
     #[error("{path}: frontmatter name `{name}` does not match the directory name")]
     NameMismatch {
-        /// The offending skill directory.
         path: PathBuf,
         /// The name the frontmatter claims.
         name: String,
     },
-    /// A file holds characters a reviewer does not see but an agent reads.
     #[error("{path}: {file} holds {count} invisible character(s), the first at {first}")]
     HiddenCharacters {
-        /// The offending skill directory.
         path: PathBuf,
         /// The file, relative to the skill directory.
         file: String,
@@ -66,14 +47,11 @@ pub enum SkillError {
         /// The first of them.
         first: Hidden,
     },
-    /// A file of the skill could not be read.
     #[error("{path}: cannot read {file}: {source}")]
     Io {
-        /// The offending skill directory.
         path: PathBuf,
         /// The file, relative to the skill directory.
         file: String,
-        /// The underlying failure.
         source: std::io::Error,
     },
 }

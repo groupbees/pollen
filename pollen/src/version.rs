@@ -8,11 +8,8 @@ use std::collections::BTreeMap;
 /// `autoupdate` only ever propose a release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {
-    /// Incremented on breaking changes.
     pub major: u64,
-    /// Incremented on additions.
     pub minor: u64,
-    /// Incremented on fixes.
     pub patch: u64,
 }
 

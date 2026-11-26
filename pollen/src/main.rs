@@ -1,5 +1,3 @@
-//! `pollen` — deploy Agent Skills declared in `pollen.yaml`.
-
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

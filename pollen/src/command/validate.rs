@@ -1,6 +1,3 @@
-//! `pollen validate`: check one or more config files, and optionally the
-//! skills their sources yield.
-
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
@@ -12,7 +9,6 @@ use crate::command::plan::{self, Planned};
 /// What checking one config file found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Validation {
-    /// The config file.
     pub path: PathBuf,
     /// How many sources it declares.
     pub sources: usize,
@@ -22,8 +18,6 @@ pub struct Validation {
     pub problems: Vec<String>,
 }
 
-/// Run the subcommand.
-///
 /// With several files, every one is checked before the run fails, so a single
 /// invocation reports every problem rather than only the first. With one, its
 /// error is returned as it is rather than wrapped in a count.
