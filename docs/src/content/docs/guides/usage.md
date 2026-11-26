@@ -132,9 +132,11 @@ Print the JSON Schema for the config file:
 pollen schema
 ```
 
-Deploy somewhere else, for this run only — into directories of your own, or
-for some clients only, in place of every entry's `clients` or `targets`. Such
-a run visits no other directory, so it prunes nothing elsewhere:
+Deploy somewhere else for this run only, into directories of your own in
+place of every entry's `clients` or `targets`, or for some clients only:
+`--client` deploys what the config sends to those clients and nothing else,
+so an entry sent to other clients or to `targets` is left out. Such a run
+visits no other directory, so it prunes nothing elsewhere:
 
 ```sh
 pollen update --target ~/.claude/skills --target ~/.agents/skills

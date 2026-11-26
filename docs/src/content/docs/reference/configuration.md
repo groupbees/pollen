@@ -110,8 +110,9 @@ prunes what the config does not send there: dropping a client, or moving an
 entry from `clients` to `targets`, removes what pollen deployed in that
 client's directory. A directory left with nothing pollen deployed loses its
 `.pollen.json`, and is removed when empty. A directory only `targets` named
-keeps its skills once no entry names it. `--target` and `--client` replace
-every entry's destination for one run, and that run visits no other directory.
+keeps its skills once no entry names it. For one run, `--target` replaces
+every entry's destination, and `--client` keeps only what the entries send to
+those clients; that run visits no other directory.
 
 A
 [JSON Schema](https://github.com/groupbees/pollen/blob/main/schema/pollen.schema.json)

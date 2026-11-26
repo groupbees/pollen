@@ -97,11 +97,12 @@ pub struct Options {
     )]
     pub targets: Vec<PathBuf>,
 
-    /// Client to deploy for, instead of the destination of every entry.
+    /// Client to deploy for: only what the config sends to it.
     ///
-    /// The run visits no other directory. Repeat the flag for several
-    /// clients. The environment variable takes a
-    /// comma-separated list.
+    /// An entry sent to other clients or to `targets` deploys nothing in
+    /// that run, and the run visits no other directory. Repeat the flag for
+    /// several clients. The environment variable takes a comma-separated
+    /// list.
     #[arg(
         long = "client",
         env = "POLLEN_CLIENTS",

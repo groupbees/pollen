@@ -75,7 +75,7 @@ work like the CLI's global flags:
 | `config` | `--config` | `pollen.yaml`, from the working directory |
 | `global_` | `--global` | `False`; cannot be combined with `config` |
 | `targets` | `--target` | each entry's `clients` or `targets`, else the top-level `clients` |
-| `clients` | `--client` | each entry's `clients` or `targets`, else the top-level `clients`; `"claude-code"`, `"opencode"` or `"all"`, and not with `targets` |
+| `clients` | `--client` | every client; keeps only what the config sends to these clients: `"claude-code"`, `"opencode"` or `"all"`, and not with `targets` |
 | `cache_dir` | `--cache-dir` | the user cache directory |
 | `offline` | `--offline` | `False` |
 | `credentials_file` | `--credentials-file` | the user-level credentials file, which may be absent; taken by `update`, `validate`, `outdated` and `autoupdate` |

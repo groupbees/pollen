@@ -92,8 +92,10 @@ one name to the same directory is an error.
   directory is created only when something is planned for it.
 - A run with `--target` deploys skills only, into those directories in place
   of every entry's destination, and visits no agent directory. A run with
-  `--client` deploys every entry for those clients in place of its own
-  destination.
+  `--client` deploys only what the config sends to those clients, into
+  their directories: an entry whose clients, its own or the top-level ones,
+  do not include them, or that names `targets`, deploys nothing in that
+  run.
 - With neither flag, the run also visits every known client directory in its
   scope whose state file names this config, and prunes what the config no
   longer plans there. Dropping a client, or moving an entry from `clients` to
@@ -148,6 +150,8 @@ flowchart LR
 - A config sending everything to one directory of its own repeats `targets`
   on each entry.
 - `--target` cannot exercise agents; testing them goes through `--client`.
+- `--client` cannot deploy for a client the config does not send anything
+  to: it narrows a run, it does not redirect it.
 - A tool pollen does not know cannot receive agents until a release adds its
   row.
 - Nested OpenCode agents (`team/reviewer.md`) are not supported, since a state
@@ -189,6 +193,10 @@ flowchart LR
 - **A required `client` on each agents entry**: it keeps one file per client
   by construction, but declares an agent's destination differently from a
   skill's, and needs one entry per client for a file that suits several.
+- **`--client` sending every entry to those clients**: two entries holding
+  one name for two different clients would collide in the one directory
+  they are redirected to, and a run would deploy a file to a client its
+  config never named.
 - **`--target` deploying agents too**: a one-off run into a scratch directory
   would rewrite the user's real agent directories.
 - **Leaving a dropped client's directories in place**: consistent with a

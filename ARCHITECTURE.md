@@ -50,8 +50,9 @@ to a module under [pollen/src/](pollen/src/), except the last.
   selection — an item of a `repo`'s `skills`, a discovery origin — carries
   its `Destination`: the entry's `targets`, its `clients`, or the default,
   the config's top-level `clients`, all of them when it names none. A
-  `Scope` holds what a run adds: the CLI's `--target` or `--client`, which
-  replaces every entry's destination, and where client skill directories
+  `Scope` holds what a run adds: the CLI's `--target`, which replaces every
+  entry's destination, or its `--client`, which keeps only the entries'
+  clients among those it names, and where client skill directories
   sit, the working directory, or the home directory with `--global`, which
   also reads the user-level config. Resolving a destination in a scope gives
   its directories, duplicates dropped. It knows nothing about git or the

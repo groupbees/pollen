@@ -69,9 +69,9 @@ pub enum Destination {
 /// How one run turns destinations into directories.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scope {
-    /// The command line's `--target` or `--client`, which replaces the
-    /// destination of every entry; [`Destination::Default`] when neither is
-    /// given.
+    /// The command line's `--target`, which replaces the destination of
+    /// every entry, or its `--client`, which keeps only what the entries send
+    /// to those clients; [`Destination::Default`] when neither is given.
     pub cli: Destination,
     /// The directory client skill directories sit in: empty for the working
     /// directory, the home directory with `--global`.
@@ -192,9 +192,10 @@ impl Config {
     }
 
     /// The directories `destination` deploys into: the command line's
-    /// override when `scope` has one, else the entry's own `targets`, else the
-    /// skill directories of its `clients`, else those of the config's
-    /// `clients`, every client by default.
+    /// `--target` when `scope` has one, else the entry's own `targets`, else
+    /// the skill directories of its `clients`, else those of the config's
+    /// `clients`, every client by default. A `--client` run keeps only the
+    /// clients among those, so an entry sent to `targets` deploys nowhere.
     ///
     /// Duplicates are dropped so a directory named twice is written once.
     #[must_use]
@@ -203,8 +204,20 @@ impl Config {
             (Destination::Default, Destination::Default) => {
                 scope.client_dirs(self.clients.as_deref().unwrap_or(&Client::ALL))
             }
-            (Destination::Clients(clients), _)
-            | (Destination::Default, Destination::Clients(clients)) => scope.client_dirs(clients),
+            (Destination::Clients(only), destination) => {
+                let own: &[Client] = match destination {
+                    Destination::Default => self.clients.as_deref().unwrap_or(&Client::ALL),
+                    Destination::Clients(clients) => clients,
+                    Destination::Targets(_) => &[],
+                };
+                let kept: Vec<Client> = own
+                    .iter()
+                    .copied()
+                    .filter(|client| only.contains(client))
+                    .collect();
+                scope.client_dirs(&kept)
+            }
+            (Destination::Default, Destination::Clients(clients)) => scope.client_dirs(clients),
             (Destination::Targets(targets), _)
             | (Destination::Default, Destination::Targets(targets)) => {
                 targets.iter().map(|target| expand_home(target)).collect()
@@ -1361,22 +1374,37 @@ mod tests {
     }
 
     #[test]
-    fn cli_clients_win_over_every_entry() {
-        for own in [
-            "        targets: [out]\n",
-            "        clients: opencode\n",
-            "",
+    fn cli_clients_keep_only_what_entries_send_to_them() {
+        for (own, expected) in [
+            ("        targets: [out]\n", vec![]),
+            ("        clients: claude-code\n", vec![]),
+            (
+                "        clients: [claude-code, opencode]\n",
+                vec![".agents/skills"],
+            ),
+            ("", vec![".agents/skills"]),
         ] {
             let config = two_entries(own);
-            let scope = Scope::new(&[], &[Client::ClaudeCode], false);
+            let scope = Scope::new(&[], &[Client::OpenCode], false);
 
             assert_eq!(
                 per_entry(&config, &scope),
-                [vec![".claude/skills"], vec![".claude/skills"]],
+                [expected, vec![".agents/skills"]],
                 "{own}"
             );
             assert!(scope.overridden());
         }
+    }
+
+    #[test]
+    fn cli_clients_leave_out_a_client_the_config_does_not_deploy_for() {
+        let config = parse(&format!("version: 2\nclients: opencode\n{V2_LOCAL}")).unwrap();
+
+        assert!(
+            config
+                .all_directories(&Scope::new(&[], &[Client::ClaudeCode], false))
+                .is_empty()
+        );
     }
 
     #[test]
