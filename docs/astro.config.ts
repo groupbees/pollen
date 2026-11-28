@@ -5,6 +5,7 @@ import starlightLinksValidator from "starlight-links-validator";
 import starlightLlmsTxt from "starlight-llms-txt";
 import { baseLinks } from "./src/base-links.ts";
 import { buildEnv, SITE, SITE_BASE } from "./src/build-env.ts";
+import { EDIT_BASE_URL } from "./src/edit-link.ts";
 import { joinBase } from "./src/versions.ts";
 
 const { versions, current, base, srcDir } = buildEnv;
@@ -38,7 +39,8 @@ export default defineConfig({
 			logo: { src: "../assets/logo-icon.svg" },
 			favicon: "/favicon.svg",
 			social: [{ icon: "github", label: "GitHub", href: "https://github.com/groupbees/pollen" }],
-			editLink: { baseUrl: "https://github.com/groupbees/pollen/edit/main/docs/" },
+			editLink: { baseUrl: EDIT_BASE_URL },
+			routeMiddleware: "./src/route-middleware.ts",
 			customCss: ["./src/styles/theme.css"],
 			components: {
 				Banner: "./src/components/Banner.astro",

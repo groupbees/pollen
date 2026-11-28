@@ -110,7 +110,7 @@ test, and need nothing else. CI runs them on Linux and Windows, with the oldest
 and the newest supported Python.
 
 The documentation site has its own unit tests, for the version planning,
-the version picker and the link rewriting:
+the version picker, the link rewriting and the edit link:
 
 ```sh
 task test:docs
@@ -298,6 +298,10 @@ pages of its last patch tag inside the current site's config and theme: the
 latest release at the root, `main` at `/next/`, older ones at `/vX.Y/`.
 Pre-release tags are not versions. With no release, `main` is served at the
 root.
+
+A page's "Edit page" link opens its file on `main`, in every version, since
+`main` is where a fix lands; a released page that `main` no longer has shows
+no link.
 
 Preview while writing, at <http://localhost:4321/pollen/>:
 
