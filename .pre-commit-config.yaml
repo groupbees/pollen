@@ -28,10 +28,14 @@ repos:
         args:
           - --strict
 
-  - repo: https://github.com/rhysd/actionlint
-    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca  # frozen: v1.7.12
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: c7d31dc612dffdd4d3b2f2b88b9660d3ab057ee8  # frozen: v1.33.1
     hooks:
-      - id: actionlint
+      - id: zizmor
+        args:
+          - --offline
+          - --strict-collection
+          - --no-progress
 
   - repo: https://github.com/renovatebot/pre-commit-hooks
     rev: 3565c66f2d58f34041a13ebc6d4132c008e52a74  # frozen: 44.257.9

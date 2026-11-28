@@ -185,12 +185,16 @@ pre-commit run cargo-clippy --all-files
 
 The hooks are listed in
 [.pre-commit-config.yaml](.pre-commit-config.yaml), and the code style is the
-one they enforce. Most fix the file themselves, or name what to fix; these need
+one they enforce. pre-commit installs each upstream hook into an environment of
+its own, with the Python and Node.js mise installs: `zizmor`, for instance,
+comes from its PyPI wheel. The `local` hooks call the tools mise puts on the
+`PATH`. Most hooks fix the file themselves, or name what to fix; these need
 more:
 
 | Hook | What it checks | How to fix |
 | --- | --- | --- |
 | `yamllint` | YAML style, per [.yamllint.yaml](.yamllint.yaml) — block style only, no leading `---` | Rewrite the YAML |
+| `zizmor` | The GitHub workflows against GitHub's schema and its security audits: untrusted input in a `run:` script, `persist-credentials`, token permissions, unpinned actions, cache poisoning. Runs offline | Fix the workflow as the audit's linked documentation describes; never silence it with `# zizmor: ignore[…]` |
 | `renovate-config-validator` | [renovate.json](renovate.json) is valid and uses no option Renovate has renamed | `npx --package renovate -- renovate-config-validator --migrate renovate.json` for a renamed option; otherwise fix the key it names |
 | `cargo-clippy` | `clippy` with `pedantic` on both crates, warnings denied | Fix the finding, or add a scoped `#[allow]` with a justification |
 | `pyright` | Types of the Python package, its stubs and its tests | Fix the type, or the stub in [pollen-py/python/pollen/_pollen.pyi](pollen-py/python/pollen/_pollen.pyi) |
