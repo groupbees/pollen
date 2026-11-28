@@ -232,6 +232,11 @@ required. `docs` is path-filtered on `docs/` outside `docs/adr/`, `assets/`,
 the mise and Task files and its own workflow, so it is never a required check.
 For the Windows code paths without a Windows host, `task lint:windows` runs clippy on them.
 
+GitHub's CodeQL code scanning, in default setup, analyses the Rust, the
+Python and the workflows on every pull request, every push to `main` and
+weekly. It has no workflow file and no local equivalent, and is not a
+required check: its analysis outlasts the CI jobs.
+
 The pipeline needs these secrets and variables:
 
 - `HOMEBREW_TAP_CLIENT_ID` (variable) and `HOMEBREW_TAP_PRIVATE_KEY`
@@ -319,6 +324,11 @@ task docs:build
   [README.md](README.md) when installing or the first run changes, and
   [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the trade-offs behind
   it.
+- [.bestpractices.json](.bestpractices.json) proposes the answers to the
+  [OpenSSF Best Practices](https://www.bestpractices.dev/projects/17144)
+  form, each citing the file that proves it. A change that breaks one of its
+  claims — moves `SECURITY.md`, drops a linter or a test suite, changes the
+  TLS or digest code — updates it in the same pull request.
 - Label the pull request so it lands in the right release-notes section (see
   [.github/release.yaml](.github/release.yaml)).
 - CI must be green.
