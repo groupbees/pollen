@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+# Any run on main could write a cache, and a release restoring it would ship
+# what that run planted, signed and attested.
+cache-mode: none
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -21,6 +25,8 @@ jobs:
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: derive the version from the tag
         id: version
@@ -38,7 +44,7 @@ jobs:
     name: binaries
     needs:
       - version
-    uses: ./.github/workflows/binaries.yaml
+    uses: $/.github/workflows/binaries.yaml
     with:
       version: ${{ needs.version.outputs.version }}
 
@@ -125,6 +131,8 @@ jobs:
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: install the tools
         id: mise
@@ -164,6 +172,8 @@ jobs:
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: build the source distribution
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b  # v1.51.0
@@ -226,6 +236,8 @@ jobs:
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: find the previous stable tag
         id: previous
@@ -296,6 +308,8 @@ jobs:
     steps:
       - name: check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: render the formula from the release checksums
         env:
@@ -331,6 +345,7 @@ jobs:
           repository: ${{ github.repository_owner }}/homebrew-tap
           token: ${{ steps.token.outputs.token }}
           path: tap
+          persist-credentials: false
 
       - name: push the formula to the tap
         working-directory: tap
@@ -349,6 +364,7 @@ jobs:
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
           git commit --message "pollen ${VERSION}"
+          gh auth setup-git
           git push
 
   # The root of the site now serves this release, and Pages deploys from the
