@@ -10,7 +10,8 @@
 		"check": "astro check",
 		"lint": "biome check .",
 		"format": "biome check --write .",
-		"test": "node --test 'src/**/*.test.ts'"
+		"test": "node --test 'src/**/*.test.ts'",
+		"coverage": "node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=spec --test-reporter-destination=coverage/report.txt --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'src/**/*.test.ts'"
 	},
 	"dependencies": {
 		"@astrojs/markdown-satteri": "0.4.10",
