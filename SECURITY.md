@@ -44,7 +44,7 @@ Out of scope:
 
 ## What happens next
 
-1. You get an acknowledgement within a few days.
+1. You get a first response within 14 days.
 2. The report is confirmed or declined with reasons.
 3. A fix is prepared in the advisory's private fork.
 4. The fix ships in a release whose notes cite the advisory's GHSA identifier,
