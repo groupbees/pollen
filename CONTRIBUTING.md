@@ -147,20 +147,26 @@ needs [Homebrew](https://brew.sh) on `PATH`, so the task runs on macOS only:
 task test:homebrew
 ```
 
-[cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) measures the line
-and region coverage of the Rust tests in `pollen`. It leaves out branch
-coverage, which needs a nightly toolchain, and the bindings' Rust code, which
-only the Python tests run. No threshold is enforced:
+Coverage is measured for the Rust, Python and documentation site tests; the
+shell scripts under `tests/` are left out. No threshold is enforced. One
+command runs the three suites instrumented, prints their summaries and writes
+their reports:
 
 ```sh
 task coverage
 ```
 
-After that run, print the same figures as an HTML report in
-`target/llvm-cov/html/`, without running the tests again:
+| Suite | Tool | What it measures | Report |
+| --- | --- | --- | --- |
+| Rust | [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) | Lines and regions of `pollen`; branches need a nightly toolchain | `target/llvm-cov/html/` |
+| Python | [coverage.py](https://coverage.readthedocs.io), through `pytest-cov` | Lines and branches of the Python layer in `pollen-py/python/pollen/`; not the extension module, nor the bindings' Rust code it is built from | `pollen-py/htmlcov/` |
+| Documentation site | Node's test runner (`--experimental-test-coverage`) | Lines, branches and functions of `docs/src/`, test files excluded | `docs/coverage/lcov.info` |
+
+`task coverage:rust`, `task coverage:python` and `task coverage:docs` run one
+suite. After a run, print the summaries again without running the tests:
 
 ```sh
-task coverage:report -- --html
+task coverage:summary
 ```
 
 New behaviour comes with tests, and a fix comes with the regression test that
@@ -222,7 +228,7 @@ commit gate stays fast.
 | Workflow | Purpose | Reproduce locally |
 | --- | --- | --- |
 | [quality.yaml](.github/workflows/quality.yaml) | The merge gate: hooks, tests on Linux and Windows, the LiteLLM and Homebrew checks, release builds | `task lint`, `task test`, `task test:litellm`, `task test:homebrew` |
-| [coverage.yaml](.github/workflows/coverage.yaml) | The Rust tests' coverage on Linux: a table in the run's summary, the HTML report as an artifact | `task coverage` |
+| [coverage.yaml](.github/workflows/coverage.yaml) | The Rust, Python and documentation site tests' coverage on Linux: a table per suite in the run's summary, the reports as artifacts | `task coverage` |
 | [binaries.yaml](.github/workflows/binaries.yaml) | The release archive of every target, for `quality` and `release` | `task build -- --target <target>`; for musl, on Linux of the same architecture with `musl-tools`, prefixed with `CC_x86_64_unknown_linux_musl=musl-gcc` (or `CC_aarch64_unknown_linux_musl`) |
 | [docs.yaml](.github/workflows/docs.yaml) | Every version of the documentation site, links validated, deployed to GitHub Pages from `main` | `git fetch --tags` then `task docs:build` |
 | [security.yaml](.github/workflows/security.yaml) | Trivy scan of the repository | `trivy fs .` |

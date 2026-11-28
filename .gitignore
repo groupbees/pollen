@@ -2,6 +2,8 @@
 /.agents/skills/
 /.claude/skills/
 /pollen-py/.venv/
+/pollen-py/.coverage
+/pollen-py/htmlcov/
 /pollen-py/python/pollen/*.so
 /pollen-py/python/pollen/*.pyd
 __pycache__/

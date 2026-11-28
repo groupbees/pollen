@@ -27,31 +27,53 @@ jobs:
         uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78  # v5.3.0
         with:
           cache: false
-          install_args: rust task aqua:taiki-e/cargo-llvm-cov
+          install_args: rust aqua:taiki-e/cargo-llvm-cov python uv node task
 
       - name: cache the cargo build
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: install the documentation site's dependencies
+        run: task docs:install
+
       - name: measure the coverage
         run: task coverage
 
-      - name: write the report to the job summary
+      - name: write the summaries to the job summary
         run: |
           {
             echo '## Rust test coverage'
             echo '```text'
-            task --silent coverage:report
+            task --silent coverage:rust:summary
+            echo '```'
+            echo '## Python test coverage'
+            echo '```text'
+            task --silent coverage:python:summary
+            echo '```'
+            echo '## Documentation site test coverage'
+            echo '```text'
+            task --silent coverage:docs:summary
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: render the HTML report
-        run: task coverage:report -- --html
-
-      - name: upload the HTML report
+      - name: upload the Rust HTML report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
-          name: coverage-html
+          name: coverage-rust-html
           path: target/llvm-cov/html/
+          if-no-files-found: error
+
+      - name: upload the Python HTML report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: coverage-python-html
+          path: pollen-py/htmlcov/
+          if-no-files-found: error
+
+      - name: upload the documentation site's LCOV report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: coverage-docs-lcov
+          path: docs/coverage/lcov.info
           if-no-files-found: error

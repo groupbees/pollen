@@ -42,16 +42,6 @@ tasks:
     cmds:
       - cargo test --all-targets --locked {{.CLI_ARGS}}
 
-  coverage:
-    desc: Run the Rust tests and measure their line and region coverage
-    cmds:
-      - cargo llvm-cov --all-targets --locked {{.CLI_ARGS}}
-
-  coverage:report:
-    desc: Print the report of the last coverage run, in another format if asked
-    cmds:
-      - cargo llvm-cov report {{.CLI_ARGS}}
-
   test:python:
     desc: Build the Python bindings and run their tests
     dir: pollen-py
@@ -79,6 +69,54 @@ tasks:
       - darwin
     cmds:
       - tests/homebrew-formula.sh
+
+  coverage:
+    desc: Run the Rust, Python and documentation site tests and measure their coverage
+    cmds:
+      - task: coverage:rust
+      - task: coverage:python
+      - task: coverage:docs
+
+  coverage:summary:
+    desc: Print the summaries of the last coverage runs
+    cmds:
+      - task: coverage:rust:summary
+      - task: coverage:python:summary
+      - task: coverage:docs:summary
+
+  coverage:rust:
+    desc: Run the Rust tests and measure their line and region coverage
+    cmds:
+      - cargo llvm-cov --all-targets --locked {{.CLI_ARGS}}
+      - cargo llvm-cov report --html
+
+  coverage:rust:summary:
+    desc: Print the summary of the last Rust coverage run
+    cmds:
+      - cargo llvm-cov report
+
+  coverage:python:
+    desc: Build the Python bindings, run their tests and measure their line and branch coverage
+    dir: pollen-py
+    cmds:
+      - uv run --locked pytest --cov --cov-report=term --cov-report=html {{.CLI_ARGS}}
+
+  coverage:python:summary:
+    desc: Print the summary of the last Python coverage run
+    dir: pollen-py
+    cmds:
+      - uv run --locked coverage report
+
+  coverage:docs:
+    desc: Run the documentation site's unit tests and measure their line, branch and function coverage
+    cmds:
+      - mkdir -p docs/coverage
+      - npm --prefix docs run coverage
+
+  coverage:docs:summary:
+    desc: Print the summary of the last documentation site coverage run
+    cmds:
+      - sed -n 's/^ℹ //; /start of coverage report/,/end of coverage report/p' docs/coverage/report.txt
 
   build:
     desc: Build the pollen binary in release mode
